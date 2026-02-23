@@ -35,17 +35,12 @@ def analyze_telemetry(filtered_csv_path: Path, base_name: str) -> None:
     # Create summary output directory
     summary_dir = workspace_root / "csv_output"
     
-    print("\n" + "="*60)
-    print("TELEMETRY ANALYSIS")
-    print("="*60)
-    
     # Calculate lap times and statistics
     lap_stats = _calculate_lap_statistics(df)
     
     # Export summary statistics
     summary_path = summary_dir / f"{base_name}_summary.csv"
     lap_stats.to_csv(summary_path, index=False)
-    print(f"\nSummary: {summary_path.name}")
     
     # Start building the markdown report
     report_lines = []
@@ -56,8 +51,6 @@ def analyze_telemetry(filtered_csv_path: Path, base_name: str) -> None:
     
     # Display lap times
     report_lines.append(f"## Lap Times\n")
-    print(f"\n{'Lap':<6} {'Time':<14} {'Avg Speed':<14} {'Max Speed':<14} {'Status'}")
-    print("-" * 70)
     
     lap_table = "| Lap | Time | Avg Speed (mph) | Max Speed (mph) | Status |\n"
     lap_table += "|-----|------|-----------------|-----------------|--------|\n"
@@ -73,8 +66,6 @@ def analyze_telemetry(filtered_csv_path: Path, base_name: str) -> None:
             status = " (Partial)"
         elif row.get('is_fastest', False):
             status = " (Fastest)"
-        
-        print(f"{int(row['Lap']):<6} {time_str:<14} {row['AvgSpeed']:<14.1f} {row['MaxSpeed']:<14.1f}{status}")
         
         # Add to markdown report
         status_md = ""
@@ -95,10 +86,7 @@ def analyze_telemetry(filtered_csv_path: Path, base_name: str) -> None:
     valid_laps = get_valid_laps(df)
     
     if len(valid_laps) == 0:
-        print("\nNo complete laps for plotting")
         return
-    
-    print("\nGenerating plots...")
     
     # Collect all figures for combined HTML
     figures_dict = {}
@@ -150,9 +138,7 @@ def analyze_telemetry(filtered_csv_path: Path, base_name: str) -> None:
     with open(report_path, 'w') as f:
         f.write('\n'.join(report_lines))
     
-    print(f"\nReport: {report_path.name}")
-    print(f"Plots: plots/")
-    print("="*60)
+    print(f"\n✅ Analysis complete: {base_name}_telemetry_report.html")
 
 
 def _calculate_lap_statistics(df: pd.DataFrame) -> pd.DataFrame:
@@ -220,15 +206,15 @@ def _analyze_gear_shifts(df: pd.DataFrame) -> list[str]:
     """Analyze gear shift patterns and RPM. Returns markdown report lines."""
     report_lines = ["\n## Gear Shift Analysis\n"]
     
-    print("\nGEAR SHIFT ANALYSIS")
-    print("="*60)
+    # print("\nGEAR SHIFT ANALYSIS")
+    # print("="*60)
     
     # Check if we have RPM data
     has_rpm = 'RPM' in df.columns
     
     if not has_rpm:
-        print("⚠ RPM data not available in telemetry")
-        print("  Add 'RPM' to the channels list in convert.py to analyze shift RPM")
+        # print("⚠ RPM data not available in telemetry")
+        # print("  Add 'RPM' to the channels list in convert.py to analyze shift RPM")
         report_lines.append("⚠️ **RPM data not available** - Add 'RPM' to channels for shift analysis.\n")
         return report_lines
     
@@ -241,15 +227,15 @@ def _analyze_gear_shifts(df: pd.DataFrame) -> list[str]:
     upshifts = df_copy[df_copy['UpShift']]
     downshifts = df_copy[df_copy['DownShift']]
     
-    print(f"\nTotal upshifts: {len(upshifts)}")
-    print(f"Total downshifts: {len(downshifts)}")
+    # print(f"\nTotal upshifts: {len(upshifts)}")
+    # print(f"Total downshifts: {len(downshifts)}")
     
     report_lines.append(f"**Total upshifts:** {len(upshifts)}")
     report_lines.append(f"**Total downshifts:** {len(downshifts)}\n")
     
     if has_rpm and len(upshifts) > 0:
-        print(f"\n{'Upshift':<15} {'Avg RPM':<12} {'Min RPM':<12} {'Max RPM':<12}")
-        print("-" * 60)
+        # print(f"\n{'Upshift':<15} {'Avg RPM':<12} {'Min RPM':<12} {'Max RPM':<12}")
+        # print("-" * 60)
         
         report_lines.append("### Upshift RPM by Gear\n")
         report_lines.append("| Upshift | Avg RPM | Min RPM | Max RPM |")
@@ -261,7 +247,7 @@ def _analyze_gear_shifts(df: pd.DataFrame) -> list[str]:
                 avg_rpm = gear_shifts['RPM'].mean()
                 min_rpm = gear_shifts['RPM'].min()
                 max_rpm = gear_shifts['RPM'].max()
-                print(f"{int(gear)} → {int(gear+1):<10} {avg_rpm:<12.0f} {min_rpm:<12.0f} {max_rpm:<12.0f}")
+                # print(f"{int(gear)} → {int(gear+1):<10} {avg_rpm:<12.0f} {min_rpm:<12.0f} {max_rpm:<12.0f}")
                 report_lines.append(f"| {int(gear)} → {int(gear+1)} | {avg_rpm:.0f} | {min_rpm:.0f} | {max_rpm:.0f} |")
         
         report_lines.append("")
@@ -281,8 +267,8 @@ def _analyze_gear_shifts(df: pd.DataFrame) -> list[str]:
             feedback = "Consistent shift points."
         
         report_lines.append(f"{feedback}\n")
-        print(f"  Average shift RPM: {upshift_rpm:.0f} ± {upshift_std:.0f}")
-        print(f"  {feedback}")
+        # print(f"  Average shift RPM: {upshift_rpm:.0f} ± {upshift_std:.0f}")
+        # print(f"  {feedback}")
     
     return report_lines
 
@@ -294,12 +280,12 @@ def _analyze_input_smoothness(df: pd.DataFrame, valid_laps: list) -> list[str]:
     config = load_config()
     smoothness_config = config['input_smoothness']
     
-    print("\nINPUT SMOOTHNESS")
-    print("="*60)
-    
-    print(f"\n{'Lap':<6} {'Throttle':<25} {'Brake':<25}")
-    print(f"{'':6} {'Smoothness':<12} {'Variation':<12} {'Smoothness':<12} {'Variation':<12}")
-    print("-" * 60)
+# print("\nINPUT SMOOTHNESS")
+    # print("="*60)
+
+    # print(f"\n{'Lap':<6} {'Throttle':<25} {'Brake':<25}")
+    # print(f"{'':6} {'Smoothness':<12} {'Variation':<12} {'Smoothness':<12} {'Variation':<12}")
+    # print("-" * 60)
     
     report_lines.append("| Lap | Throttle Smoothness | Throttle Variation | Brake Smoothness | Brake Variation |")
     report_lines.append("|-----|---------------------|--------------------|--------------------|-----------------|")
@@ -342,7 +328,7 @@ def _analyze_input_smoothness(df: pd.DataFrame, valid_laps: list) -> list[str]:
             brake_rating = "Rough"
             brake_rating_md = "Rough"
         
-        print(f"{int(lap):<6} {throttle_rating:<12} {throttle_variation:<12.4f} {brake_rating:<12} {brake_variation:<12.4f}")
+        # print(f"{int(lap):<6} {throttle_rating:<12} {throttle_variation:<12.4f} {brake_rating:<12} {brake_variation:<12.4f}")
         report_lines.append(f"| {int(lap)} | {throttle_rating_md} | {throttle_variation:.4f} | {brake_rating_md} | {brake_variation:.4f} |")
     
     report_lines.append("")
@@ -361,7 +347,7 @@ def _compare_laps(df: pd.DataFrame, lap_stats: pd.DataFrame, valid_laps: list,
     # Only compare complete laps
     complete_laps = lap_stats[~lap_stats['IsPartial']]
     if len(complete_laps) < 2:
-        print("Not enough complete laps for comparison")
+        # print("Not enough complete laps for comparison")
         report_lines.append("Not enough complete laps for comparison.\n")
         return report_lines
     
@@ -369,9 +355,9 @@ def _compare_laps(df: pd.DataFrame, lap_stats: pd.DataFrame, valid_laps: list,
     slowest_lap = complete_laps.loc[complete_laps['LapTime'].idxmax(), 'Lap']
     
     # Print analysis
-    print(f"\n{'='*60}")
-    print("FASTEST LAP ANALYSIS")
-    print("="*60)
+    # print(f"\n{'='*60}")
+    # print("FASTEST LAP ANALYSIS")
+    # print("="*60)
     
     time_diff = complete_laps.loc[complete_laps['Lap'] == slowest_lap, 'LapTime'].values[0] - \
                 complete_laps.loc[complete_laps['Lap'] == fastest_lap, 'LapTime'].values[0]
@@ -382,10 +368,10 @@ def _compare_laps(df: pd.DataFrame, lap_stats: pd.DataFrame, valid_laps: list,
     fastest_throttle = complete_laps.loc[complete_laps['Lap'] == fastest_lap, 'AvgThrottle'].values[0]
     slowest_throttle = complete_laps.loc[complete_laps['Lap'] == slowest_lap, 'AvgThrottle'].values[0]
     
-    print(f"\nFastest lap (Lap {int(fastest_lap)}) was {time_diff:.3f}s faster")
-    print(f"\nKey differences:")
-    print(f"  • Average speed: {fastest_avg_speed:.1f} mph vs {slowest_avg_speed:.1f} mph")
-    print(f"  • Average throttle: {fastest_throttle:.1f}% vs {slowest_throttle:.1f}%")
+    # print(f"\nFastest lap (Lap {int(fastest_lap)}) was {time_diff:.3f}s faster")
+    # print(f"\nKey differences:")
+    # print(f"  • Average speed: {fastest_avg_speed:.1f} mph vs {slowest_avg_speed:.1f} mph")
+    # print(f"  • Average throttle: {fastest_throttle:.1f}% vs {slowest_throttle:.1f}%")
     
     report_lines.append(f"Fastest lap (Lap {int(fastest_lap)}) was **{time_diff:.3f}s faster** than slowest (Lap {int(slowest_lap)}).\n")
     report_lines.append("### Key Differences\n")
@@ -393,10 +379,10 @@ def _compare_laps(df: pd.DataFrame, lap_stats: pd.DataFrame, valid_laps: list,
     report_lines.append(f"- **Average throttle:** {fastest_throttle:.1f}% vs {slowest_throttle:.1f}%\n")
     
     if fastest_throttle > slowest_throttle + 2:
-        print(f"  💡 More aggressive throttle application on fastest lap")
+        # print(f"  💡 More aggressive throttle application on fastest lap")
         report_lines.append("💡 More aggressive throttle application on fastest lap")
     if fastest_avg_speed > slowest_avg_speed + 2:
-        print(f"  💡 Better corner exit speed or earlier throttle application")
+        # print(f"  💡 Better corner exit speed or earlier throttle application")
         report_lines.append("💡 Better corner exit speed or earlier throttle application\n")
     
     return report_lines
@@ -494,7 +480,7 @@ def _corner_analysis(df: pd.DataFrame, valid_laps: list) -> list[str]:
                 corners.append(apex_idx)
             in_corner = False
     
-    print(f"Corners detected: {len(corners)}")
+    # print(f"Corners detected: {len(corners)}")
     report_lines.append(f"**{len(corners)} corners detected**\n")
     
     if len(corners) == 0:
@@ -590,9 +576,9 @@ def _consistency_analysis(df: pd.DataFrame, valid_laps: list) -> list[str]:
     report_lines.append(f"| Avg Speed | ±{speed_std:.2f} mph | {speed_rating} |")
     report_lines.append("")
     
-    print(f"Consistency: {consistency_score:.1f}/100")
-    print(f"  Lap time std: ±{lap_time_std:.3f}s ({time_rating})")
-    print(f"  Speed std: ±{speed_std:.2f} mph ({speed_rating})")
+    # print(f"Consistency: {consistency_score:.1f}/100")
+    # print(f"  Lap time std: ±{lap_time_std:.3f}s ({time_rating})")
+    # print(f"  Speed std: ±{speed_std:.2f} mph ({speed_rating})")
     
     return report_lines
 
@@ -608,7 +594,7 @@ def _steering_analysis(df: pd.DataFrame, valid_laps: list) -> list[str]:
     config = load_config()
     steering_config = config['steering_analysis']
     
-    print(f"\nSteering Analysis:")
+    # print(f"\nSteering Analysis:")
     
     report_lines.append("| Lap | Smoothness | Corrections/Lap | Max Angle | Rating |")
     report_lines.append("|-----|------------|-----------------|-----------|--------|")
@@ -638,7 +624,7 @@ def _steering_analysis(df: pd.DataFrame, valid_laps: list) -> list[str]:
             f"| {int(lap)} | {smoothness_pct:.1f}% | {int(corrections)} | {max_angle:.3f} rad | {rating} |"
         )
         
-        print(f"Lap {int(lap)}: {smoothness_pct:.1f}% smooth, {int(corrections)} corrections ({rating})")
+        # print(f"Lap {int(lap)}: {smoothness_pct:.1f}% smooth, {int(corrections)} corrections ({rating})")
     
     report_lines.append(f"\nTarget: >{steering_config['excellent_smoothness']}% smoothness, <{steering_config['excellent_corrections']} corrections/lap.\n")
     
@@ -652,7 +638,7 @@ def _trail_braking_analysis(df: pd.DataFrame, valid_laps: list) -> list[str]:
     config = load_config()
     trail_config = config['trail_braking']
     
-    print(f"\nTrail Braking:")
+    # print(f"\nTrail Braking:")
     
     for lap in valid_laps:
         lap_data = df[df['Lap'] == lap].sort_values('LapDistPct')
@@ -675,7 +661,7 @@ def _trail_braking_analysis(df: pd.DataFrame, valid_laps: list) -> list[str]:
         report_lines.append(f"- Trail braking: {trail_pct:.1f}% of lap")
         report_lines.append(f"- Brake release rate: {abs(release_rate):.4f}\n")
         
-        print(f"Lap {int(lap)}: {trail_pct:.1f}% trail braking")
+        # print(f"Lap {int(lap)}: {trail_pct:.1f}% trail braking")
     
     report_lines.append("\nTypical range: 15-25% of lap. Progressive release rate maintains weight transfer.\n")
     

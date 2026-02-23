@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+import plotly.io as pio
 from plotly.subplots import make_subplots
 
 from iracing_telemetry.utils import convert_speed_to_mph, format_lap_time
@@ -71,7 +73,7 @@ def plot_speed_traces(df: pd.DataFrame, valid_laps: list, plots_dir: Path, base_
     if save_png:
         png_path = plots_dir / f"{base_name}_speed_traces.png"
         fig.write_image(str(png_path), width=1600, height=600, scale=2)
-        print(f"Speed traces: {png_path.name}")
+        # print(f"Speed traces: {png_path.name}")
     
     return fig
 
@@ -167,7 +169,7 @@ def plot_throttle_brake(df: pd.DataFrame, valid_laps: list, plots_dir: Path, bas
     if save_png:
         png_path = plots_dir / f"{base_name}_throttle_brake.png"
         fig.write_image(str(png_path), width=1600, height=400 * n_laps, scale=2)
-        print(f"Throttle/brake: {png_path.name}")
+        # print(f"Throttle/brake: {png_path.name}")
     
     return fig
 
@@ -268,7 +270,8 @@ def plot_braking_points(df: pd.DataFrame, valid_laps: list, plots_dir: Path, bas
         figures.append(fig)
     
     if save_png:
-        print(f"Braking points: {len(valid_laps)} laps (PNG)")
+        # print(f"Braking points: {len(valid_laps)} laps (PNG)")
+        pass
     return figures
 
 
@@ -280,11 +283,6 @@ def plot_racing_line(df: pd.DataFrame, valid_laps: list, plots_dir: Path, base_n
     
     for idx, lap in enumerate(valid_laps):
         lap_data = df[df['Lap'] == lap].sort_values('LapDistPct')
-        
-        # Parse LatAccel if it's stored as a list/array in string format
-        if isinstance(lap_data['LatAccel'].iloc[0], str):
-            print(f"  LatAccel data is in array format - skipping racing line plot")
-            return None
         
         fig.add_trace(go.Scatter(
             x=lap_data['LapDistPct'] * 100,
@@ -311,7 +309,7 @@ def plot_racing_line(df: pd.DataFrame, valid_laps: list, plots_dir: Path, base_n
     if save_png:
         png_path = plots_dir / f"{base_name}_racing_line_lateral_g.png"
         fig.write_image(str(png_path), width=1600, height=600, scale=2)
-        print(f"Racing line (lateral G): {png_path.name}")
+        # print(f"Racing line (lateral G): {png_path.name}")
     
     return fig
 
@@ -380,7 +378,7 @@ def plot_brake_consistency(df: pd.DataFrame, valid_laps: list, plots_dir: Path, 
     if save_png:
         png_path = plots_dir / f"{base_name}_brake_consistency_overlay.png"
         fig.write_image(str(png_path), width=1600, height=800, scale=2)
-        print(f"Brake consistency: {png_path.name}")
+        # print(f"Brake consistency: {png_path.name}")
     
     return fig
 
@@ -449,7 +447,7 @@ def plot_throttle_consistency(df: pd.DataFrame, valid_laps: list, plots_dir: Pat
     if save_png:
         png_path = plots_dir / f"{base_name}_throttle_consistency_overlay.png"
         fig.write_image(str(png_path), width=1600, height=800, scale=2)
-        print(f"Throttle consistency: {png_path.name}")
+        # print(f"Throttle consistency: {png_path.name}")
     
     return fig
 
@@ -515,9 +513,7 @@ def plot_brake_trace(df: pd.DataFrame, valid_laps: list, plots_dir: Path, base_n
         
         figures.append(fig)
     
-    if save_png:
-        print(f"Brake traces: {len(valid_laps)} laps (PNG)")
-    
+
     return figures
 
 
@@ -607,7 +603,7 @@ def plot_delta_time(df: pd.DataFrame, valid_laps: list, fastest_lap: int, plots_
     if save_png:
         png_path = plots_dir / f"{base_name}_delta_time_analysis.png"
         fig.write_image(str(png_path), width=1600, height=800, scale=2)
-        print(f"Delta time analysis: {png_path.name}")
+        # print(f"Delta time analysis: {png_path.name}")
     
     return fig
 
@@ -672,9 +668,23 @@ def plot_track_map(df: pd.DataFrame, valid_laps: list, plots_dir: Path, base_nam
     if save_png:
         png_path = plots_dir / f"{base_name}_track_map_gps.png"
         fig.write_image(str(png_path), width=1600, height=600, scale=2)
-        print(f"Track map (GPS): {png_path.name}")
+        # print(f"Track map (GPS): {png_path.name}")
     
     return fig
+
+
+def _convert_to_serializable(obj):
+    """Convert numpy arrays and other non-serializable objects to JSON-serializable format."""
+    if isinstance(obj, dict):
+        return {k: _convert_to_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_convert_to_serializable(item) for item, in obj]
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, (np.integer, np.floating)):
+        return float(obj)
+    else:
+        return obj
 
 
 def create_combined_html(figures_dict: dict, plots_dir: Path, base_name: str) -> None:
@@ -761,23 +771,53 @@ def create_combined_html(figures_dict: dict, plots_dir: Path, base_name: str) ->
                 if fig:
                     plot_id += 1
                     div_id = f"plot_{plot_id}"
-                    plot_json = fig.to_json()
+                    # Convert each trace to dict, then manually convert numpy arrays
+                    data_list = []
+                    for trace in fig.data:
+                        trace_dict = trace.to_plotly_json()
+                        # Convert any numpy arrays in the trace dict to lists
+                        for key, val in trace_dict.items():
+                            if isinstance(val, np.ndarray):
+                                trace_dict[key] = val.tolist()
+                        data_list.append(trace_dict)
+                    
+                    layout_dict = fig.layout.to_plotly_json()
+                    fig_json = json.dumps({"data": data_list, "layout": layout_dict})
+                    
                     html_content += f"""
-        <div class="plot-container" id="{div_id}"></div>
-        <script>
-            Plotly.newPlot('{div_id}', {plot_json});
-        </script>
+        <div class="plot-container">
+            <div id="{div_id}" style="width:100%;height:600px;"></div>
+            <script>
+                var plotData = {fig_json};
+                Plotly.newPlot('{div_id}', plotData.data, plotData.layout, {{responsive: true}});
+            </script>
+        </div>
 """
         else:
             if figures:
                 plot_id += 1
                 div_id = f"plot_{plot_id}"
-                plot_json = figures.to_json()
+                # Convert each trace to dict, then manually convert numpy arrays
+                data_list = []
+                for trace in figures.data:
+                    trace_dict = trace.to_plotly_json()
+                    # Convert any numpy arrays in the trace dict to lists
+                    for key, val in trace_dict.items():
+                        if isinstance(val, np.ndarray):
+                            trace_dict[key] = val.tolist()
+                    data_list.append(trace_dict)
+                
+                layout_dict = figures.layout.to_plotly_json()
+                fig_json = json.dumps({"data": data_list, "layout": layout_dict})
+                
                 html_content += f"""
-        <div class="plot-container" id="{div_id}"></div>
-        <script>
-            Plotly.newPlot('{div_id}', {plot_json});
-        </script>
+        <div class="plot-container">
+            <div id="{div_id}" style="width:100%;height:600px;"></div>
+            <script>
+                var plotData = {fig_json};
+                Plotly.newPlot('{div_id}', plotData.data, plotData.layout, {{responsive: true}});
+            </script>
+        </div>
 """
         
         html_content += "    </div>\n"
@@ -789,4 +829,3 @@ def create_combined_html(figures_dict: dict, plots_dir: Path, base_name: str) ->
     
     html_path = plots_dir / f"{base_name}_telemetry_report.html"
     html_path.write_text(html_content)
-    print(f"\n✅ Combined interactive report: {html_path.name}")

@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 
 import irsdk
+import numpy as np
 import pandas as pd
 
 from .analysis import analyze_telemetry
@@ -78,6 +79,12 @@ def convert_ibt_to_csv(input_path: Path, output_path: Path | None = None) -> Non
     for channel in channels:
         try:
             values = ibt.get_all(channel)
+            
+            # Handle array values (like LatAccel, LongAccel) by averaging
+            if len(values) > 0 and isinstance(values[0], (list, np.ndarray)):
+                # Convert arrays to their mean values
+                values = [np.mean(v) if isinstance(v, (list, np.ndarray)) else v for v in values]
+            
             data[channel] = values
         except Exception as e:
             # Skip channels that can't be read
@@ -90,8 +97,7 @@ def convert_ibt_to_csv(input_path: Path, output_path: Path | None = None) -> Non
 
     ibt.close()
 
-    print(f"✓ Full CSV: {output_path.name}")
-    print(f"  Rows: {len(df):,} | Columns: {len(df.columns)}")
+    # Full CSV saved
 
     # Define essential channels for filtered output
     desired_channels = [
@@ -126,13 +132,12 @@ def convert_ibt_to_csv(input_path: Path, output_path: Path | None = None) -> Non
     filtered_output = output_path.with_stem(f"{output_path.stem}_filtered")
     df_filtered.to_csv(filtered_output, index=False)
 
-    print(f"\n✓ Filtered CSV: {filtered_output.name}")
-    print(f"  Rows: {len(df_filtered):,} | Columns: {len(df_filtered.columns)}")
+    # Filtered CSV saved
 
     # Generate per-lap CSV files (only for complete laps)
     if "Lap" in df_filtered.columns:
         unique_laps = sorted(df_filtered["Lap"].unique())
-        print(f"\n✓ Per-lap CSVs:")
+        # print(f"\n✓ Per-lap CSVs:")
         
         config = load_config()
         min_lap_samples = config['lap_validation']['min_lap_samples']
@@ -143,23 +148,25 @@ def convert_ibt_to_csv(input_path: Path, output_path: Path | None = None) -> Non
             # Skip laps with insufficient data or incomplete coverage
             if not is_lap_complete(lap_df):
                 if len(lap_df) < min_lap_samples:
-                    print(f"  Lap {int(lap_num)}: Skipped ({len(lap_df):,} rows - insufficient data)")
+                    # print(f"  Lap {int(lap_num)}: Skipped ({len(lap_df):,} rows - insufficient data)")
+                    pass
                 else:
                     lap_dist_range = lap_df['LapDistPct'].max() - lap_df['LapDistPct'].min()
                     coverage_pct = lap_dist_range * 100
-                    print(f"  Lap {int(lap_num)}: Skipped (partial lap - {coverage_pct:.0f}% coverage)")
+                    # print(f"  Lap {int(lap_num)}: Skipped (partial lap - {coverage_pct:.0f}% coverage)")
                 continue
             
             lap_output = output_path.with_stem(f"{output_path.stem}_lap{int(lap_num)}")
             lap_df.to_csv(lap_output, index=False)
-            print(f"  Lap {int(lap_num)}: {lap_output.name} ({len(lap_df):,} rows)")
+            # print(f"  Lap {int(lap_num)}: {lap_output.name} ({len(lap_df):,} rows)")
     else:
-        print("\n⚠ Warning: 'Lap' column not found, skipping per-lap CSV generation")
+        pass
     
     # Perform telemetry analysis
     try:
         analyze_telemetry(filtered_output, base_name)
+        print(f"✅ Conversion complete: {base_name}")
     except Exception as e:
-        print(f"\n⚠ Analysis failed: {e}")
+        print(f"❌ Analysis failed: {e}")
         import traceback
         traceback.print_exc()
