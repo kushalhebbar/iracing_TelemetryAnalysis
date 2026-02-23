@@ -1,0 +1,41 @@
+{
+  "speed_conversion": {
+    "ms_to_mph": 2.237
+  },
+  "lap_validation": {
+    "min_lap_samples": 100,
+    "completion_threshold": 0.90
+  },
+  "input_smoothness": {
+    "throttle_smooth_threshold": 0.05,
+    "throttle_fair_threshold": 0.10,
+    "brake_smooth_threshold": 0.01,
+    "brake_fair_threshold": 0.02
+  },
+  "steering_analysis": {
+    "excellent_smoothness": 90,
+    "good_smoothness": 80,
+    "excellent_corrections": 10,
+    "good_corrections": 20
+  },
+  "consistency_rating": {
+    "good_lap_time": 0.5,
+    "fair_lap_time": 1.0,
+    "good_speed": 1.0,
+    "fair_speed": 2.0
+  },
+  "gear_shift": {
+    "variance_high": 1000,
+    "variance_moderate": 500
+  },
+  "corner_detection": {
+    "speed_threshold": 0.6,
+    "brake_threshold": 0.2,
+    "window_size": 0.05
+  },
+  "trail_braking": {
+    "brake_threshold": 0.05,
+    "throttle_threshold": 0.05,
+    "steering_threshold": 0.05
+  }
+}

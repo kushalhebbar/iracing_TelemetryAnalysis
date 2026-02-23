@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "iracing-telemetry"
+version = "0.1.0"
+description = "Convert iRacing .ibt telemetry files to CSV for analysis."
+readme = "README.md"
+packages = [{ include = "iracing_telemetry", from = "src" }]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+pandas = "^2.2.0"
+numpy = "^2.0.0"
+pyirsdk = "*"
+scipy = "^1.11.0"
+plotly = "^6.5.2"
+kaleido = "^1.2.0"
+
+[tool.poetry.scripts]
+iracing-telemetry = "iracing_telemetry.cli:main"
+
+[build-system]
+requires = ["poetry-core>=1.8.0"]
+build-backend = "poetry.core.masonry.api"

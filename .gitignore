@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Poetry
+poetry.lock
+
+# macOS
+.DS_Store
+
+# Project-specific: Exclude generated output files
+csv_output/*
+!csv_output/.gitkeep
+
+plots/*
+!plots/.gitkeep
+
+ibt_input/*
+!ibt_input/.gitkeep
