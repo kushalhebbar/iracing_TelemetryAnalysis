@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 
@@ -10,163 +11,161 @@ import pandas as pd
 from .analysis import analyze_telemetry
 from .utils import is_lap_complete, load_config
 
+logger = logging.getLogger("iracing_telemetry")
+
+# Essential channels kept in the filtered CSV / per-lap files.
+FILTERED_CHANNELS = [
+    "SessionTime",
+    "Lap",
+    "LapDistPct",
+    "Speed",
+    "Throttle",
+    "Brake",
+    "SteeringWheelAngle",
+    "Gear",
+    "RPM",
+    "LatAccel",
+    "LongAccel",
+    "Lat",  # GPS latitude for track map
+    "Lon",  # GPS longitude for track map
+]
+
 
 def _normalize_filename(ibt_filename: str) -> str:
-    """Extract track name and date from .ibt filename, removing car name and time.
-    
+    """Extract track name and date from an .ibt filename, dropping car and time.
+
     Example:
-        'porsche992rgt3_monza full 2026-02-18 20-06-55.ibt' 
+        'porsche992rgt3_monza full 2026-02-18 20-06-55.ibt'
         -> 'monza_full_2026-02-18'
     """
-    # Remove the .ibt extension
-    base_name = ibt_filename.replace('.ibt', '')
-    
-    # Try to find the pattern: carname_trackname date time
-    # Look for underscore followed by track name (letters/spaces) and date pattern
-    match = re.match(r'^[^_]+_(.+)$', base_name)
-    
-    if match:
-        extracted = match.group(1)
-    else:
-        extracted = base_name
-    
-    # Replace spaces with underscores
-    normalized = extracted.replace(' ', '_')
-    
-    # Remove time portion: strip anything after the date pattern (YYYY-MM-DD)
-    # Pattern: keep everything up to and including YYYY-MM-DD, remove HH-MM-SS or _HHMMSS
-    normalized = re.sub(r'_\d{2}-\d{2}-\d{2}$', '', normalized)
-    normalized = re.sub(r'_\d{6}$', '', normalized)
-    
+    base_name = ibt_filename.replace(".ibt", "")
+
+    # Drop the leading car name (everything up to the first underscore).
+    match = re.match(r"^[^_]+_(.+)$", base_name)
+    extracted = match.group(1) if match else base_name
+
+    normalized = extracted.replace(" ", "_")
+
+    # Strip the trailing time portion, keeping up to the YYYY-MM-DD date.
+    normalized = re.sub(r"_\d{2}-\d{2}-\d{2}$", "", normalized)
+    normalized = re.sub(r"_\d{6}$", "", normalized)
+
     return normalized
 
 
-def convert_ibt_to_csv(input_path: Path, output_path: Path | None = None) -> None:
-    """Convert an iRacing `.ibt` telemetry file to CSV files.
-
-    Generates:
-    - Full CSV with all telemetry channels
-    - Filtered CSV with essential channels
-    - Per-lap CSV files (filtered data only)
-
-    All outputs are saved to csv_output/ directory in the workspace root.
-
-    Args:
-        input_path: Path to the .ibt file
-        output_path: Optional custom output path (auto-generated if None)
-    """
-    # Generate standardized output name
-    base_name = _normalize_filename(input_path.name)
-    
-    # Create csv_output directory at workspace root (not relative to input file)
-    # Navigate up from src/iracing_telemetry/ to workspace root
-    workspace_root = Path.cwd()
-    output_dir = workspace_root / "csv_output"
-    output_dir.mkdir(exist_ok=True)
-    
-    if output_path is None:
-        output_path = output_dir / f"{base_name}.csv"
-    
-    # Open the IBT file
+def _read_ibt(input_path: Path) -> pd.DataFrame:
+    """Read every telemetry channel from an .ibt file into a DataFrame."""
     ibt = irsdk.IBT()
     ibt.open(str(input_path))
+    try:
+        data: dict[str, list] = {}
+        for channel in ibt.var_headers_names:
+            try:
+                values = ibt.get_all(channel)
+            except Exception as exc:  # noqa: BLE001 - skip unreadable channels
+                logger.warning("Could not read channel '%s': %s", channel, exc)
+                continue
 
-    # Get all available telemetry channels
-    channels = ibt.var_headers_names
-
-    # Build a dictionary of {channel_name: [values]}
-    data = {}
-    for channel in channels:
-        try:
-            values = ibt.get_all(channel)
-            
-            # Handle array values (like LatAccel, LongAccel) by averaging
-            if len(values) > 0 and isinstance(values[0], (list, np.ndarray)):
-                # Convert arrays to their mean values
-                values = [np.mean(v) if isinstance(v, (list, np.ndarray)) else v for v in values]
-            
+            # Collapse array channels (e.g. LatAccel) to their mean value.
+            if len(values) > 0 and isinstance(values[0], list | np.ndarray):
+                values = [
+                    np.mean(v) if isinstance(v, list | np.ndarray) else v
+                    for v in values
+                ]
             data[channel] = values
-        except Exception as e:
-            # Skip channels that can't be read
-            print(f"Warning: Could not read channel '{channel}': {e}")
-            continue
+        return pd.DataFrame(data)
+    finally:
+        ibt.close()
 
-    # Create DataFrame and export full CSV
-    df = pd.DataFrame(data)
-    df.to_csv(output_path, index=False)
 
-    ibt.close()
+def convert_ibt_to_csv(
+    input_path: Path,
+    output_dir: Path | None = None,
+    generate_plots: bool = True,
+) -> None:
+    """Convert an iRacing .ibt file to CSVs and, optionally, an analysis report.
 
-    # Full CSV saved
+    Writes a full CSV, a filtered CSV, and one CSV per complete lap. When
+    generate_plots is set, it also produces the interactive HTML report and a
+    markdown summary.
 
-    # Define essential channels for filtered output
-    desired_channels = [
-        "SessionTime",
-        "Lap",
-        "LapDistPct",
-        "Speed",
-        "Throttle",
-        "Brake",
-        "SteeringWheelAngle",
-        "Gear",
-        "RPM",
-        "LatAccel",
-        "LongAccel",
-        "Lat",  # GPS latitude for track map
-        "Lon",  # GPS longitude for track map
-    ]
+    Args:
+        input_path: Path to the .ibt file.
+        output_dir: Base directory for output. CSVs go to <output_dir>/csv_output
+            and plots to <output_dir>/plots. Defaults to the current directory.
+        generate_plots: Run the analysis and produce plots/report.
+    """
+    base_name = _normalize_filename(input_path.name)
 
-    # Handle LapDistPct/LapDist fallback
+    base_dir = output_dir if output_dir is not None else Path.cwd()
+    csv_dir = base_dir / "csv_output"
+    plots_dir = base_dir / "plots"
+    csv_dir.mkdir(parents=True, exist_ok=True)
+
+    full_output = csv_dir / f"{base_name}.csv"
+
+    df = _read_ibt(input_path)
+    df.to_csv(full_output, index=False)
+    logger.info("Full CSV written: %s", full_output.name)
+
+    # Resolve filtered channels, tolerating a LapDist fallback.
     available_channels = []
-    for channel in desired_channels:
+    for channel in FILTERED_CHANNELS:
         if channel in df.columns:
             available_channels.append(channel)
         elif channel == "LapDistPct" and "LapDist" in df.columns:
             available_channels.append("LapDist")
-            print(f"  Note: Using 'LapDist' instead of 'LapDistPct'")
+            logger.info("Using 'LapDist' instead of 'LapDistPct'")
 
-    # Create filtered DataFrame
     df_filtered = df[available_channels]
-
-    # Save filtered CSV
-    filtered_output = output_path.with_stem(f"{output_path.stem}_filtered")
+    filtered_output = full_output.with_stem(f"{full_output.stem}_filtered")
     df_filtered.to_csv(filtered_output, index=False)
+    logger.info("Filtered CSV written: %s", filtered_output.name)
 
-    # Filtered CSV saved
+    _write_per_lap_csvs(df_filtered, full_output)
 
-    # Generate per-lap CSV files (only for complete laps)
-    if "Lap" in df_filtered.columns:
-        unique_laps = sorted(df_filtered["Lap"].unique())
-        # print(f"\n✓ Per-lap CSVs:")
-        
-        config = load_config()
-        min_lap_samples = config['lap_validation']['min_lap_samples']
-        
-        for lap_num in unique_laps:
-            lap_df = df_filtered[df_filtered["Lap"] == lap_num]
-            
-            # Skip laps with insufficient data or incomplete coverage
-            if not is_lap_complete(lap_df):
-                if len(lap_df) < min_lap_samples:
-                    # print(f"  Lap {int(lap_num)}: Skipped ({len(lap_df):,} rows - insufficient data)")
-                    pass
-                else:
-                    lap_dist_range = lap_df['LapDistPct'].max() - lap_df['LapDistPct'].min()
-                    coverage_pct = lap_dist_range * 100
-                    # print(f"  Lap {int(lap_num)}: Skipped (partial lap - {coverage_pct:.0f}% coverage)")
-                continue
-            
-            lap_output = output_path.with_stem(f"{output_path.stem}_lap{int(lap_num)}")
-            lap_df.to_csv(lap_output, index=False)
-            # print(f"  Lap {int(lap_num)}: {lap_output.name} ({len(lap_df):,} rows)")
-    else:
-        pass
-    
-    # Perform telemetry analysis
+    if not generate_plots:
+        logger.info("Skipping plot generation (--no-plots)")
+        logger.info("Conversion complete: %s", base_name)
+        return
+
     try:
-        analyze_telemetry(filtered_output, base_name)
-        print(f"✅ Conversion complete: {base_name}")
-    except Exception as e:
-        print(f"❌ Analysis failed: {e}")
-        import traceback
-        traceback.print_exc()
+        analyze_telemetry(filtered_output, base_name, plots_dir=plots_dir)
+        logger.info("Conversion complete: %s", base_name)
+    except Exception:
+        logger.exception("Analysis failed for %s", base_name)
+        raise
+
+
+def _write_per_lap_csvs(df_filtered: pd.DataFrame, full_output: Path) -> None:
+    """Write one CSV per complete lap next to the filtered output."""
+    if "Lap" not in df_filtered.columns:
+        return
+
+    config = load_config()
+    min_lap_samples = config["lap_validation"]["min_lap_samples"]
+
+    for lap_num in sorted(df_filtered["Lap"].unique()):
+        lap_df = df_filtered[df_filtered["Lap"] == lap_num]
+
+        if not is_lap_complete(lap_df):
+            if len(lap_df) < min_lap_samples:
+                logger.debug(
+                    "Lap %d skipped (%d rows - insufficient data)",
+                    int(lap_num),
+                    len(lap_df),
+                )
+            else:
+                coverage = (
+                    lap_df["LapDistPct"].max() - lap_df["LapDistPct"].min()
+                ) * 100
+                logger.debug(
+                    "Lap %d skipped (partial lap - %.0f%% coverage)",
+                    int(lap_num),
+                    coverage,
+                )
+            continue
+
+        lap_output = full_output.with_stem(f"{full_output.stem}_lap{int(lap_num)}")
+        lap_df.to_csv(lap_output, index=False)
+        logger.debug("Lap %d written: %s (%d rows)", int(lap_num), lap_output.name, len(lap_df))

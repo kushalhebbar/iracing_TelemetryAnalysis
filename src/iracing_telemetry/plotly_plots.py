@@ -8,10 +8,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-import plotly.io as pio
 from plotly.subplots import make_subplots
 
-from iracing_telemetry.utils import convert_speed_to_mph, format_lap_time
+from iracing_telemetry.utils import convert_speed_to_mph, format_lap_time, ms_to_mph
 
 # Professional color scheme
 COLOR_PALETTE = ['#2E86AB', '#A23B72', '#F18F01', '#C73E1D', '#6A994E', '#8E44AD', '#3498DB', '#E67E22']
@@ -39,7 +38,7 @@ LAYOUT_TEMPLATE = {
 
 
 def plot_speed_traces(df: pd.DataFrame, valid_laps: list, plots_dir: Path, base_name: str, save_png: bool = True) -> go.Figure:
-    """Plot interactive speed traces for each lap. Returns figure for combined HTML."""
+    """Speed versus lap distance for each valid lap."""
     df = convert_speed_to_mph(df)
     
     fig = go.Figure()
@@ -73,13 +72,12 @@ def plot_speed_traces(df: pd.DataFrame, valid_laps: list, plots_dir: Path, base_
     if save_png:
         png_path = plots_dir / f"{base_name}_speed_traces.png"
         fig.write_image(str(png_path), width=1600, height=600, scale=2)
-        # print(f"Speed traces: {png_path.name}")
-    
+
     return fig
 
 
 def plot_throttle_brake(df: pd.DataFrame, valid_laps: list, plots_dir: Path, base_name: str, save_png: bool = True) -> go.Figure:
-    """Plot interactive throttle and brake inputs for each lap. Returns figure for combined HTML."""
+    """Throttle, brake and speed stacked in one subplot per lap."""
     df = convert_speed_to_mph(df)
     
     n_laps = len(valid_laps)
@@ -109,7 +107,7 @@ def plot_throttle_brake(df: pd.DataFrame, valid_laps: list, plots_dir: Path, bas
                 name='Throttle',
                 fill='tozeroy',
                 line=dict(color=THROTTLE_COLOR, width=2),
-                fillcolor=f'rgba(106, 153, 78, 0.3)',
+                fillcolor='rgba(106, 153, 78, 0.3)',
                 hovertemplate='Throttle: %{y:.1f}%<extra></extra>',
                 legendgroup='inputs',
                 showlegend=(idx == 0)
@@ -126,7 +124,7 @@ def plot_throttle_brake(df: pd.DataFrame, valid_laps: list, plots_dir: Path, bas
                 name='Brake',
                 fill='tozeroy',
                 line=dict(color=BRAKE_COLOR, width=2),
-                fillcolor=f'rgba(199, 62, 29, 0.3)',
+                fillcolor='rgba(199, 62, 29, 0.3)',
                 hovertemplate='Brake: %{y:.1f}%<extra></extra>',
                 legendgroup='inputs',
                 showlegend=(idx == 0)
@@ -169,15 +167,13 @@ def plot_throttle_brake(df: pd.DataFrame, valid_laps: list, plots_dir: Path, bas
     if save_png:
         png_path = plots_dir / f"{base_name}_throttle_brake.png"
         fig.write_image(str(png_path), width=1600, height=400 * n_laps, scale=2)
-        # print(f"Throttle/brake: {png_path.name}")
-    
+
     return fig
 
 
 def plot_braking_points(df: pd.DataFrame, valid_laps: list, plots_dir: Path, base_name: str, save_png: bool = True) -> list[go.Figure]:
-    """Identify and visualize braking points with interactive features. Returns list of figures."""
-    df = df.copy()
-    df['Speed'] = df['Speed'] * 2.237
+    """Shade braking zones and mark the apex speed, one figure per lap."""
+    df = convert_speed_to_mph(df)
     
     figures = []
     for lap in valid_laps:
@@ -203,7 +199,7 @@ def plot_braking_points(df: pd.DataFrame, valid_laps: list, plots_dir: Path, bas
         brake_end = ~braking & braking.shift(1, fill_value=False)
         
         # Highlight braking zones
-        brake_zones = []
+        brake_zones: list = []
         corner_apexes = []
         
         for idx in lap_data[brake_start].index:
@@ -268,15 +264,12 @@ def plot_braking_points(df: pd.DataFrame, valid_laps: list, plots_dir: Path, bas
             fig.write_image(str(png_path), width=1600, height=600, scale=2)
         
         figures.append(fig)
-    
-    if save_png:
-        # print(f"Braking points: {len(valid_laps)} laps (PNG)")
-        pass
+
     return figures
 
 
 def plot_racing_line(df: pd.DataFrame, valid_laps: list, plots_dir: Path, base_name: str, save_png: bool = True) -> go.Figure | None:
-    """Visualize racing line using lateral acceleration. Returns figure for combined HTML."""
+    """Lateral acceleration trace, used here as a racing-line proxy."""
     fig = go.Figure()
     
     colors = [COLOR_PALETTE[i % len(COLOR_PALETTE)] for i in range(len(valid_laps))]
@@ -309,13 +302,12 @@ def plot_racing_line(df: pd.DataFrame, valid_laps: list, plots_dir: Path, base_n
     if save_png:
         png_path = plots_dir / f"{base_name}_racing_line_lateral_g.png"
         fig.write_image(str(png_path), width=1600, height=600, scale=2)
-        # print(f"Racing line (lateral G): {png_path.name}")
-    
+
     return fig
 
 
 def plot_brake_consistency(df: pd.DataFrame, valid_laps: list, plots_dir: Path, base_name: str, save_png: bool = True) -> go.Figure | None:
-    """Overlay brake traces from all laps to analyze consistency. Returns figure for combined HTML."""
+    """Overlay every lap's brake and speed trace to show consistency."""
     if len(valid_laps) < 2:
         return None
     
@@ -350,7 +342,7 @@ def plot_brake_consistency(df: pd.DataFrame, valid_laps: list, plots_dir: Path, 
         
         # Speed overlay
         lap_data_speed = lap_data.copy()
-        lap_data_speed['Speed'] = lap_data_speed['Speed'] * 2.237
+        lap_data_speed['Speed'] = lap_data_speed['Speed'] * ms_to_mph()
         fig.add_trace(
             go.Scatter(
                 x=lap_data_speed['LapDistPct'] * 100,
@@ -378,13 +370,12 @@ def plot_brake_consistency(df: pd.DataFrame, valid_laps: list, plots_dir: Path, 
     if save_png:
         png_path = plots_dir / f"{base_name}_brake_consistency_overlay.png"
         fig.write_image(str(png_path), width=1600, height=800, scale=2)
-        # print(f"Brake consistency: {png_path.name}")
-    
+
     return fig
 
 
 def plot_throttle_consistency(df: pd.DataFrame, valid_laps: list, plots_dir: Path, base_name: str, save_png: bool = True) -> go.Figure | None:
-    """Overlay throttle traces from all laps to analyze consistency. Returns figure for combined HTML."""
+    """Overlay every lap's throttle and speed trace to show consistency."""
     if len(valid_laps) < 2:
         return None
     
@@ -419,7 +410,7 @@ def plot_throttle_consistency(df: pd.DataFrame, valid_laps: list, plots_dir: Pat
         
         # Speed overlay
         lap_data_speed = lap_data.copy()
-        lap_data_speed['Speed'] = lap_data_speed['Speed'] * 2.237
+        lap_data_speed['Speed'] = lap_data_speed['Speed'] * ms_to_mph()
         fig.add_trace(
             go.Scatter(
                 x=lap_data_speed['LapDistPct'] * 100,
@@ -447,13 +438,12 @@ def plot_throttle_consistency(df: pd.DataFrame, valid_laps: list, plots_dir: Pat
     if save_png:
         png_path = plots_dir / f"{base_name}_throttle_consistency_overlay.png"
         fig.write_image(str(png_path), width=1600, height=800, scale=2)
-        # print(f"Throttle consistency: {png_path.name}")
-    
+
     return fig
 
 
 def plot_brake_trace(df: pd.DataFrame, valid_laps: list, plots_dir: Path, base_name: str, save_png: bool = True) -> list[go.Figure]:
-    """Plot brake trace for each lap. Returns list of figures."""
+    """Brake pressure and speed for each lap."""
     df = convert_speed_to_mph(df)
     figures = []
     
@@ -478,7 +468,7 @@ def plot_brake_trace(df: pd.DataFrame, valid_laps: list, plots_dir: Path, base_n
                 name='Brake',
                 fill='tozeroy',
                 line=dict(color=BRAKE_COLOR, width=2.5),
-                fillcolor=f'rgba(199, 62, 29, 0.3)',
+                fillcolor='rgba(199, 62, 29, 0.3)',
                 hovertemplate='Brake: %{y:.1f}%<extra></extra>'
             ),
             row=1, col=1
@@ -518,7 +508,7 @@ def plot_brake_trace(df: pd.DataFrame, valid_laps: list, plots_dir: Path, base_n
 
 
 def plot_delta_time(df: pd.DataFrame, valid_laps: list, fastest_lap: int, plots_dir: Path, base_name: str, save_png: bool = True) -> go.Figure | None:
-    """Plot delta time analysis vs fastest lap. Returns figure for combined HTML."""
+    """Time delta to the fastest lap at each point, with a speed comparison."""
     from scipy import interpolate
     
     if len(valid_laps) < 2:
@@ -603,13 +593,12 @@ def plot_delta_time(df: pd.DataFrame, valid_laps: list, fastest_lap: int, plots_
     if save_png:
         png_path = plots_dir / f"{base_name}_delta_time_analysis.png"
         fig.write_image(str(png_path), width=1600, height=800, scale=2)
-        # print(f"Delta time analysis: {png_path.name}")
-    
+
     return fig
 
 
 def plot_track_map(df: pd.DataFrame, valid_laps: list, plots_dir: Path, base_name: str, save_png: bool = True) -> go.Figure | None:
-    """Visualize GPS-based racing line on track map. Returns figure for combined HTML."""
+    """GPS racing line coloured by speed alongside a line-consistency view."""
     if 'Lat' not in df.columns or 'Lon' not in df.columns:
         return None
     
@@ -668,23 +657,8 @@ def plot_track_map(df: pd.DataFrame, valid_laps: list, plots_dir: Path, base_nam
     if save_png:
         png_path = plots_dir / f"{base_name}_track_map_gps.png"
         fig.write_image(str(png_path), width=1600, height=600, scale=2)
-        # print(f"Track map (GPS): {png_path.name}")
-    
+
     return fig
-
-
-def _convert_to_serializable(obj):
-    """Convert numpy arrays and other non-serializable objects to JSON-serializable format."""
-    if isinstance(obj, dict):
-        return {k: _convert_to_serializable(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [_convert_to_serializable(item) for item, in obj]
-    elif isinstance(obj, np.ndarray):
-        return obj.tolist()
-    elif isinstance(obj, (np.integer, np.floating)):
-        return float(obj)
-    else:
-        return obj
 
 
 def create_combined_html(figures_dict: dict, plots_dir: Path, base_name: str) -> None:
@@ -694,7 +668,7 @@ def create_combined_html(figures_dict: dict, plots_dir: Path, base_name: str) ->
 <head>
     <meta charset="utf-8">
     <title>Telemetry Analysis - {base_name}</title>
-    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
     <style>
         body {{
             font-family: Arial, sans-serif;
@@ -745,12 +719,12 @@ def create_combined_html(figures_dict: dict, plots_dir: Path, base_name: str) ->
 </head>
 <body>
     <div class="header">
-        <h1>🏎️ iRacing Telemetry Analysis</h1>
+        <h1>iRacing Telemetry Analysis</h1>
         <p>Session: {base_name}</p>
     </div>
     
     <div class="info-box">
-        <strong>💡 Interactive Features:</strong> Hover for values, click-drag to zoom, double-click to reset, click legend items to toggle traces
+        <strong>Interactive features:</strong> Hover for values, click-drag to zoom, double-click to reset, click legend items to toggle traces
     </div>
 """
     

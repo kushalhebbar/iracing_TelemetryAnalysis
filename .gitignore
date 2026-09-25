@@ -10,9 +10,8 @@ build/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-
-# Poetry
-poetry.lock
+.coverage
+htmlcov/
 
 # macOS
 .DS_Store

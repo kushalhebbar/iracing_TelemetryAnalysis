@@ -1,7 +1,9 @@
 [tool.poetry]
 name = "iracing-telemetry"
 version = "0.1.0"
-description = "Convert iRacing .ibt telemetry files to CSV for analysis."
+description = "Convert iRacing .ibt telemetry files to CSV and generate an interactive driving-analysis report."
+authors = ["Kushal Hebbar <kushalhebbar@gmail.com>"]
+license = "MIT"
 readme = "README.md"
 packages = [{ include = "iracing_telemetry", from = "src" }]
 
@@ -14,9 +16,36 @@ scipy = "^1.11.0"
 plotly = "^6.5.2"
 kaleido = "^1.2.0"
 
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0"
+pytest-cov = "^5.0"
+ruff = "^0.6"
+mypy = "^1.11"
+pandas-stubs = "*"
+
 [tool.poetry.scripts]
 iracing-telemetry = "iracing_telemetry.cli:main"
 
 [build-system]
 requires = ["poetry-core>=1.8.0"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+no_implicit_optional = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
