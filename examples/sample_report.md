@@ -1,7 +1,11 @@
 # Telemetry Analysis Report
 
-**Session:** monza_full_2026-02-18
-**Generated:** 2026-09-25 14:51:19
+**Track:** Autodromo Nazionale Monza  —  Monza, Italy
+**Car:** Porsche 911 GT3 R (992)
+**Driver:** Kushal Hebbar
+**Turns:** 11
+**Session file:** monza_full_2026-02-18
+**Generated:** 2026-09-28 13:11:51
 
 ---
 
@@ -42,6 +46,33 @@ High variance in shift RPM. Target: <500 RPM variation per gear.
 | 2 | Fair | 0.0515 | Smooth | 0.0065 |
 
 Target: <0.05 throttle variation, <0.01 brake variation. Lower values indicate smoother inputs.
+
+
+## Sector Analysis (10 mini-sectors)
+
+**Theoretical best lap:** 1:48.633
+
+| Sector | Best time (s) | From |
+|--------|---------------|------|
+| 1 | 8.407 | Lap 2 |
+| 2 | 14.366 | Lap 2 |
+| 3 | 9.842 | Lap 2 |
+| 4 | 12.273 | Lap 2 |
+| 5 | 12.475 | Lap 2 |
+| 6 | 10.438 | Lap 2 |
+| 7 | 10.221 | Lap 2 |
+| 8 | 10.028 | Lap 2 |
+| 9 | 9.542 | Lap 2 |
+| 10 | 11.042 | Lap 2 |
+
+
+## Balance (Understeer / Oversteer)
+
+| Lap | Balance index | Understeer % | Oversteer % | Tendency |
+|-----|---------------|--------------|-------------|----------|
+| 2 | -0.125 | 13% | 63% | Oversteer |
+
+Positive index leans understeer, negative leans oversteer. Heuristic from steering angle versus lateral grip in corners.
 
 
 ---
