@@ -1,16 +1,20 @@
-"""Enhanced plotting using Plotly for interactive telemetry visualization."""
+"""Interactive Plotly figures for telemetry visualization."""
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
-import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from iracing_telemetry.utils import convert_speed_to_mph, format_lap_time, ms_to_mph
+from iracing_telemetry.balance import balance_trace, compute_balance
+from iracing_telemetry.sectors import compute_sector_times, theoretical_best
+from iracing_telemetry.utils import (
+    Units,
+    convert_speed,
+    format_lap_time,
+    speed_factor,
+    speed_label,
+)
 
 # Professional color scheme
 COLOR_PALETTE = ['#2E86AB', '#A23B72', '#F18F01', '#C73E1D', '#6A994E', '#8E44AD', '#3498DB', '#E67E22']
@@ -37,9 +41,10 @@ LAYOUT_TEMPLATE = {
 }
 
 
-def plot_speed_traces(df: pd.DataFrame, valid_laps: list, plots_dir: Path, base_name: str, save_png: bool = True) -> go.Figure:
+def plot_speed_traces(df: pd.DataFrame, valid_laps: list, units: Units = "mph") -> go.Figure:
     """Speed versus lap distance for each valid lap."""
-    df = convert_speed_to_mph(df)
+    df = convert_speed(df, units)
+    slabel = speed_label(units)
     
     fig = go.Figure()
     
@@ -56,29 +61,25 @@ def plot_speed_traces(df: pd.DataFrame, valid_laps: list, plots_dir: Path, base_
             mode='lines',
             name=f'Lap {int(lap)} ({lap_time_str})',
             line=dict(color=colors[idx], width=3),
-            hovertemplate='<b>%{fullData.name}</b><br>Distance: %{x:.1f}%<br>Speed: %{y:.1f} mph<extra></extra>'
+            hovertemplate='<b>%{fullData.name}</b><br>Distance: %{x:.1f}%<br>Speed: %{y:.1f} ' + slabel + '<extra></extra>'
         ))
     
     fig.update_layout(
         **LAYOUT_TEMPLATE,
         title=dict(text='<b>Speed Trace Comparison</b>', font=dict(size=20)),
         xaxis=dict(title='<b>Lap Distance (%)</b>', showgrid=True, gridcolor='#E5E5E5'),
-        yaxis=dict(title='<b>Speed (mph)</b>', showgrid=True, gridcolor='#E5E5E5'),
+        yaxis=dict(title=f'<b>Speed ({slabel})</b>', showgrid=True, gridcolor='#E5E5E5'),
         height=600,
         margin=dict(l=80, r=80, t=100, b=80)
     )
-    
-    # Save PNG with descriptive name
-    if save_png:
-        png_path = plots_dir / f"{base_name}_speed_traces.png"
-        fig.write_image(str(png_path), width=1600, height=600, scale=2)
 
     return fig
 
 
-def plot_throttle_brake(df: pd.DataFrame, valid_laps: list, plots_dir: Path, base_name: str, save_png: bool = True) -> go.Figure:
+def plot_throttle_brake(df: pd.DataFrame, valid_laps: list, units: Units = "mph") -> go.Figure:
     """Throttle, brake and speed stacked in one subplot per lap."""
-    df = convert_speed_to_mph(df)
+    df = convert_speed(df, units)
+    slabel = speed_label(units)
     
     n_laps = len(valid_laps)
     
@@ -140,7 +141,7 @@ def plot_throttle_brake(df: pd.DataFrame, valid_laps: list, plots_dir: Path, bas
                 mode='lines',
                 name='Speed',
                 line=dict(color=SPEED_COLOR, width=2.5),
-                hovertemplate='Speed: %{y:.1f} mph<extra></extra>',
+                hovertemplate='Speed: %{y:.1f} ' + slabel + '<extra></extra>',
                 legendgroup='speed',
                 showlegend=(idx == 0)
             ),
@@ -149,7 +150,7 @@ def plot_throttle_brake(df: pd.DataFrame, valid_laps: list, plots_dir: Path, bas
         
         # Update y-axes for this subplot
         fig.update_yaxes(title_text="<b>Input (%)</b>", range=[0, 105], row=row, col=1, secondary_y=False)
-        fig.update_yaxes(title_text="<b>Speed (mph)</b>", row=row, col=1, secondary_y=True)
+        fig.update_yaxes(title_text=f"<b>Speed ({slabel})</b>", row=row, col=1, secondary_y=True)
         
         # Add lap time to subplot title
         fig.layout.annotations[idx].update(text=f"<b>Lap {int(lap)} ({lap_time_str})</b>")
@@ -162,18 +163,14 @@ def plot_throttle_brake(df: pd.DataFrame, valid_laps: list, plots_dir: Path, bas
         height=400 * n_laps,
         margin=dict(l=80, r=80, t=100, b=80)
     )
-    
-    # Save PNG only
-    if save_png:
-        png_path = plots_dir / f"{base_name}_throttle_brake.png"
-        fig.write_image(str(png_path), width=1600, height=400 * n_laps, scale=2)
 
     return fig
 
 
-def plot_braking_points(df: pd.DataFrame, valid_laps: list, plots_dir: Path, base_name: str, save_png: bool = True) -> list[go.Figure]:
+def plot_braking_points(df: pd.DataFrame, valid_laps: list, units: Units = "mph") -> list[go.Figure]:
     """Shade braking zones and mark the apex speed, one figure per lap."""
-    df = convert_speed_to_mph(df)
+    df = convert_speed(df, units)
+    slabel = speed_label(units)
     
     figures = []
     for lap in valid_laps:
@@ -190,7 +187,7 @@ def plot_braking_points(df: pd.DataFrame, valid_laps: list, plots_dir: Path, bas
             mode='lines',
             name='Speed',
             line=dict(color=SPEED_COLOR, width=3),
-            hovertemplate='Speed: %{y:.1f} mph<extra></extra>'
+            hovertemplate='Speed: %{y:.1f} ' + slabel + '<extra></extra>'
         ))
         
         # Identify braking zones
@@ -227,7 +224,7 @@ def plot_braking_points(df: pd.DataFrame, valid_laps: list, plots_dir: Path, bas
                 corner_apexes.append({
                     'x': min_dist,
                     'y': min_speed,
-                    'text': f'{min_speed:.1f} mph'
+                    'text': f'{min_speed:.1f} ' + slabel
                 })
         
         # Add apex markers
@@ -246,29 +243,24 @@ def plot_braking_points(df: pd.DataFrame, valid_laps: list, plots_dir: Path, bas
                 text=[apex['text'] for apex in corner_apexes],
                 textposition='top center',
                 textfont=dict(size=10, color=BRAKE_COLOR),
-                hovertemplate='Apex Speed: %{y:.1f} mph<extra></extra>'
+                hovertemplate='Apex Speed: %{y:.1f} ' + slabel + '<extra></extra>'
             ))
         
         fig.update_layout(
             **LAYOUT_TEMPLATE,
             title=dict(text=f'<b>Braking Points & Corner Speeds - Lap {int(lap)} ({lap_time_str})</b>', font=dict(size=20)),
             xaxis=dict(title='<b>Lap Distance (%)</b>', showgrid=True, gridcolor='#E5E5E5'),
-            yaxis=dict(title='<b>Speed (mph)</b>', showgrid=True, gridcolor='#E5E5E5'),
+            yaxis=dict(title=f'<b>Speed ({slabel})</b>', showgrid=True, gridcolor='#E5E5E5'),
             height=600,
             margin=dict(l=80, r=80, t=100, b=80)
         )
-        
-        # Save PNG only
-        if save_png:
-            png_path = plots_dir / f"{base_name}_braking_points_lap{int(lap)}.png"
-            fig.write_image(str(png_path), width=1600, height=600, scale=2)
         
         figures.append(fig)
 
     return figures
 
 
-def plot_racing_line(df: pd.DataFrame, valid_laps: list, plots_dir: Path, base_name: str, save_png: bool = True) -> go.Figure | None:
+def plot_racing_line(df: pd.DataFrame, valid_laps: list) -> go.Figure | None:
     """Lateral acceleration trace, used here as a racing-line proxy."""
     fig = go.Figure()
     
@@ -297,19 +289,16 @@ def plot_racing_line(df: pd.DataFrame, valid_laps: list, plots_dir: Path, base_n
         height=600,
         margin=dict(l=80, r=80, t=100, b=80)
     )
-    
-    # Save PNG only
-    if save_png:
-        png_path = plots_dir / f"{base_name}_racing_line_lateral_g.png"
-        fig.write_image(str(png_path), width=1600, height=600, scale=2)
 
     return fig
 
 
-def plot_brake_consistency(df: pd.DataFrame, valid_laps: list, plots_dir: Path, base_name: str, save_png: bool = True) -> go.Figure | None:
+def plot_brake_consistency(df: pd.DataFrame, valid_laps: list, units: Units = "mph") -> go.Figure | None:
     """Overlay every lap's brake and speed trace to show consistency."""
     if len(valid_laps) < 2:
         return None
+
+    slabel = speed_label(units)
     
     fig = make_subplots(
         rows=2, cols=1,
@@ -342,7 +331,7 @@ def plot_brake_consistency(df: pd.DataFrame, valid_laps: list, plots_dir: Path, 
         
         # Speed overlay
         lap_data_speed = lap_data.copy()
-        lap_data_speed['Speed'] = lap_data_speed['Speed'] * ms_to_mph()
+        lap_data_speed['Speed'] = lap_data_speed['Speed'] * speed_factor(units)
         fig.add_trace(
             go.Scatter(
                 x=lap_data_speed['LapDistPct'] * 100,
@@ -350,7 +339,7 @@ def plot_brake_consistency(df: pd.DataFrame, valid_laps: list, plots_dir: Path, 
                 mode='lines',
                 name=f'Lap {int(lap)}',
                 line=dict(color=colors[idx], width=2.5),
-                hovertemplate='Speed: %{y:.1f} mph<extra></extra>',
+                hovertemplate='Speed: %{y:.1f} ' + slabel + '<extra></extra>',
                 legendgroup=f'lap{lap}',
                 showlegend=False
             ),
@@ -359,25 +348,23 @@ def plot_brake_consistency(df: pd.DataFrame, valid_laps: list, plots_dir: Path, 
     
     fig.update_xaxes(title_text="<b>Lap Distance (%)</b>", row=2, col=1)
     fig.update_yaxes(title_text="<b>Brake (%)</b>", range=[0, 105], row=1, col=1)
-    fig.update_yaxes(title_text="<b>Speed (mph)</b>", row=2, col=1)
+    fig.update_yaxes(title_text=f"<b>Speed ({slabel})</b>", row=2, col=1)
     
     fig.update_layout(
         **LAYOUT_TEMPLATE,
         height=800,
         margin=dict(l=80, r=80, t=100, b=80)
     )
-    
-    if save_png:
-        png_path = plots_dir / f"{base_name}_brake_consistency_overlay.png"
-        fig.write_image(str(png_path), width=1600, height=800, scale=2)
 
     return fig
 
 
-def plot_throttle_consistency(df: pd.DataFrame, valid_laps: list, plots_dir: Path, base_name: str, save_png: bool = True) -> go.Figure | None:
+def plot_throttle_consistency(df: pd.DataFrame, valid_laps: list, units: Units = "mph") -> go.Figure | None:
     """Overlay every lap's throttle and speed trace to show consistency."""
     if len(valid_laps) < 2:
         return None
+
+    slabel = speed_label(units)
     
     fig = make_subplots(
         rows=2, cols=1,
@@ -410,7 +397,7 @@ def plot_throttle_consistency(df: pd.DataFrame, valid_laps: list, plots_dir: Pat
         
         # Speed overlay
         lap_data_speed = lap_data.copy()
-        lap_data_speed['Speed'] = lap_data_speed['Speed'] * ms_to_mph()
+        lap_data_speed['Speed'] = lap_data_speed['Speed'] * speed_factor(units)
         fig.add_trace(
             go.Scatter(
                 x=lap_data_speed['LapDistPct'] * 100,
@@ -418,7 +405,7 @@ def plot_throttle_consistency(df: pd.DataFrame, valid_laps: list, plots_dir: Pat
                 mode='lines',
                 name=f'Lap {int(lap)}',
                 line=dict(color=colors[idx], width=2.5),
-                hovertemplate='Speed: %{y:.1f} mph<extra></extra>',
+                hovertemplate='Speed: %{y:.1f} ' + slabel + '<extra></extra>',
                 legendgroup=f'lap{lap}',
                 showlegend=False
             ),
@@ -427,24 +414,21 @@ def plot_throttle_consistency(df: pd.DataFrame, valid_laps: list, plots_dir: Pat
     
     fig.update_xaxes(title_text="<b>Lap Distance (%)</b>", row=2, col=1)
     fig.update_yaxes(title_text="<b>Throttle (%)</b>", range=[0, 105], row=1, col=1)
-    fig.update_yaxes(title_text="<b>Speed (mph)</b>", row=2, col=1)
+    fig.update_yaxes(title_text=f"<b>Speed ({slabel})</b>", row=2, col=1)
     
     fig.update_layout(
         **LAYOUT_TEMPLATE,
         height=800,
         margin=dict(l=80, r=80, t=100, b=80)
     )
-    
-    if save_png:
-        png_path = plots_dir / f"{base_name}_throttle_consistency_overlay.png"
-        fig.write_image(str(png_path), width=1600, height=800, scale=2)
 
     return fig
 
 
-def plot_brake_trace(df: pd.DataFrame, valid_laps: list, plots_dir: Path, base_name: str, save_png: bool = True) -> list[go.Figure]:
+def plot_brake_trace(df: pd.DataFrame, valid_laps: list, units: Units = "mph") -> list[go.Figure]:
     """Brake pressure and speed for each lap."""
-    df = convert_speed_to_mph(df)
+    df = convert_speed(df, units)
+    slabel = speed_label(units)
     figures = []
     
     for lap in valid_laps:
@@ -482,14 +466,14 @@ def plot_brake_trace(df: pd.DataFrame, valid_laps: list, plots_dir: Path, base_n
                 mode='lines',
                 name='Speed',
                 line=dict(color=SPEED_COLOR, width=2.5),
-                hovertemplate='Speed: %{y:.1f} mph<extra></extra>'
+                hovertemplate='Speed: %{y:.1f} ' + slabel + '<extra></extra>'
             ),
             row=2, col=1
         )
         
         fig.update_xaxes(title_text="<b>Lap Distance (%)</b>", row=2, col=1)
         fig.update_yaxes(title_text="<b>Brake (%)</b>", range=[0, 105], row=1, col=1)
-        fig.update_yaxes(title_text="<b>Speed (mph)</b>", row=2, col=1)
+        fig.update_yaxes(title_text=f"<b>Speed ({slabel})</b>", row=2, col=1)
         
         fig.update_layout(
             **LAYOUT_TEMPLATE,
@@ -497,24 +481,20 @@ def plot_brake_trace(df: pd.DataFrame, valid_laps: list, plots_dir: Path, base_n
             margin=dict(l=80, r=80, t=100, b=80)
         )
         
-        if save_png:
-            png_path = plots_dir / f"{base_name}_brake_trace_lap{int(lap)}.png"
-            fig.write_image(str(png_path), width=1600, height=700, scale=2)
-        
         figures.append(fig)
-    
 
     return figures
 
 
-def plot_delta_time(df: pd.DataFrame, valid_laps: list, fastest_lap: int, plots_dir: Path, base_name: str, save_png: bool = True) -> go.Figure | None:
+def plot_delta_time(df: pd.DataFrame, valid_laps: list, fastest_lap: int, units: Units = "mph") -> go.Figure | None:
     """Time delta to the fastest lap at each point, with a speed comparison."""
     from scipy import interpolate
-    
+
     if len(valid_laps) < 2:
         return None
-    
-    df = convert_speed_to_mph(df)
+
+    df = convert_speed(df, units)
+    slabel = speed_label(units)
     fastest_data = df[df['Lap'] == fastest_lap].sort_values('LapDistPct')
     
     # Create interpolation function for fastest lap
@@ -564,7 +544,7 @@ def plot_delta_time(df: pd.DataFrame, valid_laps: list, fastest_lap: int, plots_
             name=f'Lap {int(lap)}',
             line=dict(color=colors[idx], width=2),
             showlegend=False,
-            hovertemplate='<b>Lap %{fullData.name}</b><br>Speed: %{y:.1f} mph<extra></extra>'
+            hovertemplate='<b>Lap %{fullData.name}</b><br>Speed: %{y:.1f} ' + slabel + '<extra></extra>'
         ), row=2, col=1)
     
     # Add zero line for delta
@@ -577,32 +557,29 @@ def plot_delta_time(df: pd.DataFrame, valid_laps: list, fastest_lap: int, plots_
         mode='lines',
         name=f'Fastest (Lap {int(fastest_lap)})',
         line=dict(color='green', width=2, dash='dash'),
-        hovertemplate='<b>Fastest Lap</b><br>Speed: %{y:.1f} mph<extra></extra>'
+        hovertemplate='<b>Fastest Lap</b><br>Speed: %{y:.1f} ' + slabel + '<extra></extra>'
     ), row=2, col=1)
     
     fig.update_xaxes(title_text="<b>Lap Distance (%)</b>", row=2, col=1)
     fig.update_yaxes(title_text="<b>Delta Time (seconds)</b>", row=1, col=1)
-    fig.update_yaxes(title_text="<b>Speed (mph)</b>", row=2, col=1)
+    fig.update_yaxes(title_text=f"<b>Speed ({slabel})</b>", row=2, col=1)
     
     fig.update_layout(
         **LAYOUT_TEMPLATE,
         height=800,
         margin=dict(l=80, r=80, t=120, b=80)
     )
-    
-    if save_png:
-        png_path = plots_dir / f"{base_name}_delta_time_analysis.png"
-        fig.write_image(str(png_path), width=1600, height=800, scale=2)
 
     return fig
 
 
-def plot_track_map(df: pd.DataFrame, valid_laps: list, plots_dir: Path, base_name: str, save_png: bool = True) -> go.Figure | None:
+def plot_track_map(df: pd.DataFrame, valid_laps: list, units: Units = "mph") -> go.Figure | None:
     """GPS racing line coloured by speed alongside a line-consistency view."""
     if 'Lat' not in df.columns or 'Lon' not in df.columns:
         return None
-    
-    df = convert_speed_to_mph(df)
+
+    df = convert_speed(df, units)
+    slabel = speed_label(units)
     
     fig = make_subplots(
         rows=1, cols=2,
@@ -625,12 +602,12 @@ def plot_track_map(df: pd.DataFrame, valid_laps: list, plots_dir: Path, base_nam
                 colorscale='RdYlGn',
                 size=3,
                 showscale=(idx == 0),
-                colorbar=dict(title="Speed (mph)", x=0.45) if idx == 0 else None
+                colorbar=dict(title=f"Speed ({slabel})", x=0.45) if idx == 0 else None
             ),
             line=dict(color=colors[idx], width=1),
             name=f'Lap {int(lap)}',
             showlegend=False,
-            hovertemplate='<b>Lap %{fullData.name}</b><br>Speed: %{marker.color:.1f} mph<extra></extra>'
+            hovertemplate='<b>Lap %{fullData.name}</b><br>Speed: %{marker.color:.1f} ' + slabel + '<extra></extra>'
         ), row=1, col=1)
         
         # Map 2: Line comparison
@@ -653,153 +630,136 @@ def plot_track_map(df: pd.DataFrame, valid_laps: list, plots_dir: Path, base_nam
         height=600,
         margin=dict(l=80, r=80, t=100, b=80)
     )
-    
-    if save_png:
-        png_path = plots_dir / f"{base_name}_track_map_gps.png"
-        fig.write_image(str(png_path), width=1600, height=600, scale=2)
 
     return fig
 
 
-def create_combined_html(figures_dict: dict, plots_dir: Path, base_name: str) -> None:
-    """Create a single HTML file with all plots organized in sections."""
-    html_content = f"""<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <title>Telemetry Analysis - {base_name}</title>
-    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
-    <style>
-        body {{
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 20px;
-            background-color: #f5f5f5;
-        }}
-        .header {{
-            background: linear-gradient(135deg, #2E86AB 0%, #1a5276 100%);
-            color: white;
-            padding: 30px;
-            border-radius: 10px;
-            margin-bottom: 30px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }}
-        .header h1 {{
-            margin: 0;
-            font-size: 32px;
-        }}
-        .header p {{
-            margin: 10px 0 0 0;
-            opacity: 0.9;
-        }}
-        .section {{
-            background: white;
-            padding: 25px;
-            margin-bottom: 30px;
-            border-radius: 10px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }}
-        .section h2 {{
-            margin-top: 0;
-            color: #2E86AB;
-            border-bottom: 3px solid #2E86AB;
-            padding-bottom: 10px;
-        }}
-        .plot-container {{
-            margin: 20px 0;
-        }}
-        .info-box {{
-            background: #e3f2fd;
-            border-left: 4px solid #2E86AB;
-            padding: 15px;
-            margin: 20px 0;
-            border-radius: 5px;
-        }}
-    </style>
-</head>
-<body>
-    <div class="header">
-        <h1>iRacing Telemetry Analysis</h1>
-        <p>Session: {base_name}</p>
-    </div>
-    
-    <div class="info-box">
-        <strong>Interactive features:</strong> Hover for values, click-drag to zoom, double-click to reset, click legend items to toggle traces
-    </div>
-"""
-    
-    plot_id = 0
-    
-    # Add each section
-    for section_name, figures in figures_dict.items():
-        if not figures:
+def plot_sector_times(df: pd.DataFrame, valid_laps: list, n_sectors: int | None = None) -> go.Figure | None:
+    """Grouped sector-time bars per lap, with the theoretical best overlaid."""
+    sector_times = compute_sector_times(df, valid_laps, n_sectors)
+    if sector_times.empty:
+        return None
+
+    fig = go.Figure()
+    for idx, lap in enumerate(sector_times.columns):
+        fig.add_trace(go.Bar(
+            x=sector_times.index,
+            y=sector_times[lap],
+            name=f'Lap {int(lap)}',
+            marker_color=COLOR_PALETTE[idx % len(COLOR_PALETTE)],
+            hovertemplate='Sector %{x}<br>%{y:.3f}s<extra></extra>'
+        ))
+
+    best = theoretical_best(sector_times)
+    if best is not None:
+        fig.add_trace(go.Scatter(
+            x=sector_times.index,
+            y=best.best_sector_times,
+            mode='lines+markers',
+            name='Theoretical best',
+            line=dict(color=FASTEST_LAP_COLOR, width=3, dash='dash'),
+            marker=dict(size=8),
+            hovertemplate='Sector %{x}<br>Best: %{y:.3f}s<extra></extra>'
+        ))
+
+    fig.update_layout(
+        **LAYOUT_TEMPLATE,
+        barmode='group',
+        title=dict(text='<b>Sector Times</b>', font=dict(size=20)),
+        xaxis=dict(title='<b>Sector</b>', dtick=1, showgrid=False),
+        yaxis=dict(title='<b>Time (s)</b>', showgrid=True, gridcolor='#E5E5E5'),
+        height=500,
+        margin=dict(l=80, r=80, t=100, b=80)
+    )
+
+    return fig
+
+
+def plot_balance(df: pd.DataFrame, valid_laps: list) -> go.Figure | None:
+    """Understeer (+) / oversteer (-) balance around the lap, per lap."""
+    if compute_balance(df, valid_laps) == []:
+        return None
+
+    fig = go.Figure()
+    has_data = False
+    for idx, lap in enumerate(valid_laps):
+        trace = balance_trace(df, lap)
+        if trace["Balance"].notna().sum() == 0:
             continue
-        
-        html_content += f"""
-    <div class="section">
-        <h2>{section_name}</h2>
-"""
-        
-        if isinstance(figures, list):
-            for fig in figures:
-                if fig:
-                    plot_id += 1
-                    div_id = f"plot_{plot_id}"
-                    # Convert each trace to dict, then manually convert numpy arrays
-                    data_list = []
-                    for trace in fig.data:
-                        trace_dict = trace.to_plotly_json()
-                        # Convert any numpy arrays in the trace dict to lists
-                        for key, val in trace_dict.items():
-                            if isinstance(val, np.ndarray):
-                                trace_dict[key] = val.tolist()
-                        data_list.append(trace_dict)
-                    
-                    layout_dict = fig.layout.to_plotly_json()
-                    fig_json = json.dumps({"data": data_list, "layout": layout_dict})
-                    
-                    html_content += f"""
-        <div class="plot-container">
-            <div id="{div_id}" style="width:100%;height:600px;"></div>
-            <script>
-                var plotData = {fig_json};
-                Plotly.newPlot('{div_id}', plotData.data, plotData.layout, {{responsive: true}});
-            </script>
-        </div>
-"""
-        else:
-            if figures:
-                plot_id += 1
-                div_id = f"plot_{plot_id}"
-                # Convert each trace to dict, then manually convert numpy arrays
-                data_list = []
-                for trace in figures.data:
-                    trace_dict = trace.to_plotly_json()
-                    # Convert any numpy arrays in the trace dict to lists
-                    for key, val in trace_dict.items():
-                        if isinstance(val, np.ndarray):
-                            trace_dict[key] = val.tolist()
-                    data_list.append(trace_dict)
-                
-                layout_dict = figures.layout.to_plotly_json()
-                fig_json = json.dumps({"data": data_list, "layout": layout_dict})
-                
-                html_content += f"""
-        <div class="plot-container">
-            <div id="{div_id}" style="width:100%;height:600px;"></div>
-            <script>
-                var plotData = {fig_json};
-                Plotly.newPlot('{div_id}', plotData.data, plotData.layout, {{responsive: true}});
-            </script>
-        </div>
-"""
-        
-        html_content += "    </div>\n"
-    
-    html_content += """
-</body>
-</html>
-"""
-    
-    html_path = plots_dir / f"{base_name}_telemetry_report.html"
-    html_path.write_text(html_content)
+        has_data = True
+        fig.add_trace(go.Scatter(
+            x=trace["LapDistPct"] * 100,
+            y=trace["Balance"],
+            mode='lines',
+            name=f'Lap {int(lap)}',
+            connectgaps=False,
+            line=dict(color=COLOR_PALETTE[idx % len(COLOR_PALETTE)], width=2.5),
+            hovertemplate='Distance: %{x:.1f}%<br>Balance: %{y:+.2f}<extra></extra>'
+        ))
+
+    if not has_data:
+        return None
+
+    fig.add_hline(y=0, line_dash="dash", line_color="#666666", opacity=0.6)
+    fig.update_layout(
+        **LAYOUT_TEMPLATE,
+        title=dict(text='<b>Balance — Understeer (+) / Oversteer (−)</b>', font=dict(size=20)),
+        xaxis=dict(title='<b>Lap Distance (%)</b>', showgrid=True, gridcolor='#E5E5E5'),
+        yaxis=dict(title='<b>Balance index</b>', showgrid=True, gridcolor='#E5E5E5'),
+        height=500,
+        margin=dict(l=80, r=80, t=100, b=80)
+    )
+    return fig
+
+
+def build_figures(df: pd.DataFrame, valid_laps: list, units: Units = "mph") -> dict:
+    """Build every figure for a session, keyed by display section name.
+
+    Values are either a single Figure or a list of Figures (per-lap plots).
+    Sections with no data (e.g. consistency with a single lap) are omitted.
+    """
+    figures: dict = {}
+    figures["Speed Traces"] = plot_speed_traces(df, valid_laps, units)
+    figures["Throttle / Brake Inputs"] = plot_throttle_brake(df, valid_laps, units)
+    figures["Brake Traces"] = plot_brake_trace(df, valid_laps, units)
+
+    sector_times = plot_sector_times(df, valid_laps)
+    if sector_times:
+        figures["Sector Times"] = sector_times
+
+    balance = plot_balance(df, valid_laps)
+    if balance:
+        figures["Balance"] = balance
+
+    brake_consistency = plot_brake_consistency(df, valid_laps, units)
+    if brake_consistency:
+        figures["Brake Consistency"] = brake_consistency
+
+    throttle_consistency = plot_throttle_consistency(df, valid_laps, units)
+    if throttle_consistency:
+        figures["Throttle Consistency"] = throttle_consistency
+
+    racing_line = plot_racing_line(df, valid_laps)
+    if racing_line:
+        figures["Racing Line"] = racing_line
+
+    figures["Braking Points"] = plot_braking_points(df, valid_laps, units)
+
+    if len(valid_laps) >= 2:
+        lap_times = {
+            lap: (
+                df[df["Lap"] == lap]["SessionTime"].max()
+                - df[df["Lap"] == lap]["SessionTime"].min()
+            )
+            for lap in valid_laps
+        }
+        fastest_lap = min(lap_times, key=lambda lap: lap_times[lap])
+        delta = plot_delta_time(df, valid_laps, fastest_lap, units)
+        if delta:
+            figures["Delta Time"] = delta
+
+    track_map = plot_track_map(df, valid_laps, units)
+    if track_map:
+        figures["Track Map"] = track_map
+
+    return figures
