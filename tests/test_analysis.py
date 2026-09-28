@@ -11,7 +11,9 @@ from iracing_telemetry.analysis import (
     _corner_analysis,
     _steering_analysis,
     _trail_braking_analysis,
+    build_report,
 )
+from iracing_telemetry.metadata import SessionMetadata
 from iracing_telemetry.utils import ms_to_mph
 
 
@@ -35,6 +37,12 @@ class TestCalculateLapStatistics:
     def test_complete_laps_not_partial(self, telemetry_df):
         stats = _calculate_lap_statistics(telemetry_df)
         assert not stats["IsPartial"].any()
+
+    def test_kph_is_1_609x_mph(self, telemetry_df):
+        mph = _calculate_lap_statistics(telemetry_df, units="mph")
+        kph = _calculate_lap_statistics(telemetry_df, units="kph")
+        ratio = kph["MaxSpeed"].max() / mph["MaxSpeed"].max()
+        assert abs(ratio - (3.6 / 2.237)) < 0.01
 
 
 class TestAnalyzeGearShifts:
@@ -62,7 +70,7 @@ class TestReportSections:
 
     def test_compare_laps_reports_delta(self, telemetry_df):
         stats = _calculate_lap_statistics(telemetry_df)
-        lines = _compare_laps(telemetry_df, stats, [1, 2], plots_dir=None, base_name="s")
+        lines = _compare_laps(telemetry_df, stats, [1, 2])
         text = "\n".join(lines)
         assert "Fastest Lap Analysis" in text
         assert "faster" in text
@@ -70,7 +78,7 @@ class TestReportSections:
     def test_compare_laps_needs_two_complete_laps(self, telemetry_df):
         stats = _calculate_lap_statistics(telemetry_df)
         one_lap = stats[stats["Lap"] == 1]
-        lines = _compare_laps(telemetry_df, one_lap, [1], plots_dir=None, base_name="s")
+        lines = _compare_laps(telemetry_df, one_lap, [1])
         assert "Not enough complete laps" in "\n".join(lines)
 
     def test_corner_analysis_detects_corners(self, telemetry_df):
@@ -94,3 +102,21 @@ class TestReportSections:
     def test_trail_braking_reports_percentage(self, telemetry_df):
         lines = _trail_braking_analysis(telemetry_df, [1, 2])
         assert "Trail Braking Analysis" in "\n".join(lines)
+
+
+class TestBuildReport:
+    def test_includes_core_sections(self, telemetry_df):
+        report = build_report(telemetry_df, "monza")
+        for heading in ("Lap Times", "Gear Shift Analysis", "Corner-by-Corner", "Sector Analysis", "Balance ("):
+            assert heading in report
+
+    def test_uses_metadata_header(self, telemetry_df):
+        md = SessionMetadata(track_display_name="Monza", car="Porsche", driver="Kushal Hebbar")
+        report = build_report(telemetry_df, "monza", metadata=md)
+        assert "Monza" in report
+        assert "Kushal Hebbar" in report
+
+    def test_units_reflected_in_headers(self, telemetry_df):
+        assert "Avg Speed (kph)" in build_report(telemetry_df, "monza", units="kph")
+        assert "Avg Speed (mph)" in build_report(telemetry_df, "monza", units="mph")
+

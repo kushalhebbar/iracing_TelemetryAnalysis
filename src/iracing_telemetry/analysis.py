@@ -7,27 +7,38 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from iracing_telemetry import plotly_plots
+from iracing_telemetry.balance import compute_balance
+from iracing_telemetry.metadata import SessionMetadata
+from iracing_telemetry.sectors import compute_sector_times, theoretical_best
 from iracing_telemetry.utils import (
-    convert_speed_to_mph,
+    Units,
+    convert_speed,
+    format_lap_time,
     get_valid_laps,
     load_config,
     rate_smoothness,
+    speed_label,
 )
 
 logger = logging.getLogger("iracing_telemetry")
 
 
 def analyze_telemetry(
-    filtered_csv_path: Path, base_name: str, plots_dir: Path | None = None
+    filtered_csv_path: Path,
+    base_name: str,
+    plots_dir: Path | None = None,
+    units: Units = "mph",
+    metadata: SessionMetadata | None = None,
 ) -> None:
-    """Build the lap stats, plots and markdown report for a filtered CSV.
+    """Write the summary CSV and markdown report for a filtered CSV.
 
     Args:
         filtered_csv_path: Path to the filtered CSV file.
         base_name: Base name for output files (without extension).
-        plots_dir: Where plots and the markdown report go (default ./plots).
-            The summary CSV is written next to the input CSV.
+        plots_dir: Where the markdown report goes (default ./plots). The summary
+            CSV is written next to the input CSV.
+        units: Speed units for the report ("mph" or "kph").
+        metadata: Optional session metadata for the report header.
     """
     df = pd.read_csv(filtered_csv_path)
 
@@ -35,27 +46,38 @@ def analyze_telemetry(
         plots_dir = Path.cwd() / "plots"
     plots_dir.mkdir(parents=True, exist_ok=True)
 
-    # The summary CSV sits next to the filtered CSV it summarises.
-    summary_dir = filtered_csv_path.parent
-
-    lap_stats = _calculate_lap_statistics(df)
-
-    summary_path = summary_dir / f"{base_name}_summary.csv"
+    lap_stats = _calculate_lap_statistics(df, units)
+    summary_path = filtered_csv_path.parent / f"{base_name}_summary.csv"
     lap_stats.to_csv(summary_path, index=False)
 
-    report_lines = []
-    report_lines.append("# Telemetry Analysis Report")
-    report_lines.append(f"\n**Session:** {base_name}")
+    report = build_report(df, base_name, units, metadata, lap_stats=lap_stats)
+    report_path = plots_dir / "report.md"
+    report_path.write_text(report, encoding="utf-8")
+    logger.info("Report written: %s", report_path.name)
+
+
+def build_report(
+    df: pd.DataFrame,
+    base_name: str = "session",
+    units: Units = "mph",
+    metadata: SessionMetadata | None = None,
+    lap_stats: pd.DataFrame | None = None,
+) -> str:
+    """Return the full markdown analysis report for a filtered telemetry frame."""
+    if lap_stats is None:
+        lap_stats = _calculate_lap_statistics(df, units)
+    slabel = speed_label(units)
+
+    report_lines = ["# Telemetry Analysis Report"]
+    report_lines.extend(_session_header(base_name, metadata))
     report_lines.append(
         f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
     )
     report_lines.append("\n---\n")
 
     report_lines.append("## Lap Times\n")
-
-    lap_table = "| Lap | Time | Avg Speed (mph) | Max Speed (mph) | Status |\n"
+    lap_table = f"| Lap | Time | Avg Speed ({slabel}) | Max Speed ({slabel}) | Status |\n"
     lap_table += "|-----|------|-----------------|-----------------|--------|\n"
-
     for _, row in lap_stats.iterrows():
         minutes = int(row["LapTime"] // 60)
         seconds = row["LapTime"] % 60
@@ -71,79 +93,103 @@ def analyze_telemetry(
             f"| {int(row['Lap'])} | {time_str} | {row['AvgSpeed']:.1f} | "
             f"{row['MaxSpeed']:.1f} | {status_md} |\n"
         )
-
     report_lines.append(lap_table)
 
-    gear_shift_report = _analyze_gear_shifts(df)
-    report_lines.extend(gear_shift_report)
+    report_lines.extend(_analyze_gear_shifts(df))
 
     valid_laps = get_valid_laps(df)
-
     if len(valid_laps) == 0:
-        return
+        return "\n".join(report_lines)
 
-    figures_dict = {}
-    figures_dict["Speed Traces"] = plotly_plots.plot_speed_traces(
-        df, valid_laps, plots_dir, base_name
-    )
-    figures_dict["Throttle/Brake Inputs"] = plotly_plots.plot_throttle_brake(
-        df, valid_laps, plots_dir, base_name
-    )
-    figures_dict["Brake Traces"] = plotly_plots.plot_brake_trace(
-        df, valid_laps, plots_dir, base_name
-    )
+    report_lines.extend(_analyze_input_smoothness(df, valid_laps))
 
-    brake_consistency = plotly_plots.plot_brake_consistency(
-        df, valid_laps, plots_dir, base_name
-    )
-    if brake_consistency:
-        figures_dict["Brake Consistency"] = brake_consistency
+    report_lines.extend(_sector_report(df, valid_laps))
 
-    throttle_consistency = plotly_plots.plot_throttle_consistency(
-        df, valid_laps, plots_dir, base_name
-    )
-    if throttle_consistency:
-        figures_dict["Throttle Consistency"] = throttle_consistency
-
-    racing_line = plotly_plots.plot_racing_line(df, valid_laps, plots_dir, base_name)
-    if racing_line:
-        figures_dict["Racing Line"] = racing_line
-
-    figures_dict["Braking Points"] = plotly_plots.plot_braking_points(
-        df, valid_laps, plots_dir, base_name
-    )
-
-    # Create combined HTML with all plots
-    plotly_plots.create_combined_html(figures_dict, plots_dir, base_name)
-
-    smoothness_report = _analyze_input_smoothness(df, valid_laps)
-    report_lines.extend(smoothness_report)
+    report_lines.extend(_balance_report(df, valid_laps))
 
     if len(valid_laps) >= 2:
-        comparison_report = _compare_laps(
-            df, lap_stats, valid_laps, plots_dir, base_name
+        report_lines.extend(_compare_laps(df, lap_stats, valid_laps, units))
+
+    report_lines.extend(_run_advanced_analysis(df, lap_stats, valid_laps, units))
+
+    return "\n".join(report_lines)
+
+
+def _balance_report(df: pd.DataFrame, valid_laps: list) -> list[str]:
+    """Understeer / oversteer balance tendency per lap."""
+    results = compute_balance(df, valid_laps)
+    lines = ["\n## Balance (Understeer / Oversteer)\n"]
+    if not results:
+        lines.append("Steering or lateral-acceleration data not available.\n")
+        return lines
+
+    lines.append("| Lap | Balance index | Understeer % | Oversteer % | Tendency |")
+    lines.append("|-----|---------------|--------------|-------------|----------|")
+    for bal in results:
+        lines.append(
+            f"| {bal.lap} | {bal.balance_index:+.3f} | {bal.understeer_pct:.0f}% | "
+            f"{bal.oversteer_pct:.0f}% | {bal.tendency} |"
         )
-        report_lines.extend(comparison_report)
-
-    advanced_report = _run_advanced_analysis(
-        df, lap_stats, valid_laps, plots_dir, base_name
+    lines.append("")
+    lines.append(
+        "Positive index leans understeer, negative leans oversteer. Heuristic from "
+        "steering angle versus lateral grip in corners.\n"
     )
-    report_lines.extend(advanced_report)
-
-    report_path = plots_dir / "report.md"
-    with open(report_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(report_lines))
-
-    logger.info("Analysis complete: %s_telemetry_report.html", base_name)
+    return lines
 
 
-def _calculate_lap_statistics(df: pd.DataFrame) -> pd.DataFrame:
+def _sector_report(df: pd.DataFrame, valid_laps: list, n_sectors: int | None = None) -> list[str]:
+    """Mini-sector times and the theoretical best lap."""
+    sector_times = compute_sector_times(df, valid_laps, n_sectors)
+    best = theoretical_best(sector_times)
+    lines = [f"\n## Sector Analysis ({len(sector_times)} mini-sectors)\n"]
+    if best is None:
+        return lines
+
+    lines.append(f"**Theoretical best lap:** {format_lap_time(best.theoretical_best)}")
+    if len(valid_laps) >= 2 and best.time_to_gain > 0.0005:
+        lines.append(
+            f"That is **{best.time_to_gain:.3f}s** quicker than your best actual lap "
+            f"(Lap {best.actual_best_lap}, {format_lap_time(best.actual_best_time)}).\n"
+        )
+    else:
+        lines.append("")
+
+    lines.append("| Sector | Best time (s) | From |")
+    lines.append("|--------|---------------|------|")
+    for sector in sector_times.index:
+        lines.append(
+            f"| {sector} | {best.best_sector_times[sector]:.3f} | "
+            f"Lap {int(best.best_sector_lap[sector])} |"
+        )
+    lines.append("")
+    return lines
+
+
+def _session_header(base_name: str, metadata: SessionMetadata | None) -> list[str]:
+    """Report header lines describing the session (track, car, driver)."""
+    if metadata is None:
+        return [f"\n**Session:** {base_name}"]
+
+    lines = [f"\n**Track:** {metadata.track_label}"]
+    if metadata.location:
+        lines[0] += f"  —  {metadata.location}"
+    if metadata.car:
+        lines.append(f"**Car:** {metadata.car}")
+    if metadata.driver:
+        lines.append(f"**Driver:** {metadata.driver}")
+    if metadata.num_turns:
+        lines.append(f"**Turns:** {metadata.num_turns}")
+    lines.append(f"**Session file:** {base_name}")
+    return lines
+
+
+def _calculate_lap_statistics(df: pd.DataFrame, units: Units = "mph") -> pd.DataFrame:
     """Calculate lap times and statistics for each lap."""
     stats = []
-    
-    # Convert speed from m/s to mph (iRacing uses m/s)
-    df = convert_speed_to_mph(df)
-    
+
+    df = convert_speed(df, units)
+
     config = load_config()
     min_lap_samples = config['lap_validation']['min_lap_samples']
     completion_threshold = config['lap_validation']['completion_threshold']
@@ -294,12 +340,13 @@ def _analyze_input_smoothness(df: pd.DataFrame, valid_laps: list) -> list[str]:
     return report_lines
 
 
-def _compare_laps(df: pd.DataFrame, lap_stats: pd.DataFrame, valid_laps: list, 
-                 plots_dir: Path, base_name: str) -> list[str]:
+def _compare_laps(df: pd.DataFrame, lap_stats: pd.DataFrame, valid_laps: list,
+                 units: Units = "mph") -> list[str]:
     """Compare the fastest and slowest complete laps."""
     report_lines = ["\n## Fastest Lap Analysis\n"]
-    
-    df = convert_speed_to_mph(df)
+    slabel = speed_label(units)
+
+    df = convert_speed(df, units)
     
     # Only compare complete laps
     complete_laps = lap_stats[~lap_stats['IsPartial']]
@@ -322,7 +369,7 @@ def _compare_laps(df: pd.DataFrame, lap_stats: pd.DataFrame, valid_laps: list,
 
     report_lines.append(f"Fastest lap (Lap {fastest_lap}) was **{time_diff:.3f}s faster** than slowest (Lap {slowest_lap}).\n")
     report_lines.append("### Key Differences\n")
-    report_lines.append(f"- **Average speed:** {fastest_avg_speed:.1f} mph vs {slowest_avg_speed:.1f} mph")
+    report_lines.append(f"- **Average speed:** {fastest_avg_speed:.1f} {slabel} vs {slowest_avg_speed:.1f} {slabel}")
     report_lines.append(f"- **Average throttle:** {fastest_throttle:.1f}% vs {slowest_throttle:.1f}%\n")
     
     if fastest_throttle > slowest_throttle + 2:
@@ -333,14 +380,14 @@ def _compare_laps(df: pd.DataFrame, lap_stats: pd.DataFrame, valid_laps: list,
     return report_lines
 
 
-def _run_advanced_analysis(df: pd.DataFrame, lap_stats: pd.DataFrame, valid_laps: list, plots_dir: Path, base_name: str) -> list[str]:
+def _run_advanced_analysis(df: pd.DataFrame, lap_stats: pd.DataFrame, valid_laps: list, units: Units = "mph") -> list[str]:
     """Run all advanced analysis features and return report lines."""
     report_lines = ["\n---\n", "\n# Advanced Analysis\n"]
 
     if len(valid_laps) == 0:
         return report_lines
 
-    df = convert_speed_to_mph(df)
+    df_speed = convert_speed(df, units)
 
     if len(valid_laps) >= 2:
         lap_times = {}
@@ -348,32 +395,28 @@ def _run_advanced_analysis(df: pd.DataFrame, lap_stats: pd.DataFrame, valid_laps
             lap_data = df[df['Lap'] == lap]
             lap_times[lap] = lap_data['SessionTime'].max() - lap_data['SessionTime'].min()
         fastest_lap = min(lap_times, key=lambda lap: lap_times[lap])
+        report_lines.append("\n## Delta Time Analysis\n")
+        report_lines.append(f"Reference lap: {int(fastest_lap)}\n")
 
-        delta_fig = plotly_plots.plot_delta_time(df, valid_laps, fastest_lap, plots_dir, base_name)
-        if delta_fig:
-            report_lines.append("\n## Delta Time Analysis\n")
-            report_lines.append(f"Reference lap: {int(fastest_lap)}\n")
-
-    report_lines.extend(_corner_analysis(df, valid_laps))
+    report_lines.extend(_corner_analysis(df_speed, valid_laps, units))
 
     if len(valid_laps) >= 2:
-        report_lines.extend(_consistency_analysis(df, valid_laps))
+        report_lines.extend(_consistency_analysis(df_speed, valid_laps, units))
 
-    report_lines.extend(_steering_analysis(df, valid_laps))
-    report_lines.extend(_trail_braking_analysis(df, valid_laps))
+    report_lines.extend(_steering_analysis(df_speed, valid_laps))
+    report_lines.extend(_trail_braking_analysis(df_speed, valid_laps))
 
     if 'Lat' in df.columns and 'Lon' in df.columns:
-        track_fig = plotly_plots.plot_track_map(df, valid_laps, plots_dir, base_name)
-        if track_fig:
-            report_lines.append("\n## Track Map Visualization\n")
-            report_lines.append("GPS-based racing line colored by speed.\n")
+        report_lines.append("\n## Track Map Visualization\n")
+        report_lines.append("GPS-based racing line colored by speed.\n")
 
     return report_lines
 
 
-def _corner_analysis(df: pd.DataFrame, valid_laps: list) -> list[str]:
+def _corner_analysis(df: pd.DataFrame, valid_laps: list, units: Units = "mph") -> list[str]:
     """Detect corners and analyze performance through each."""
     report_lines = ["\n## Corner-by-Corner Breakdown\n"]
+    slabel = speed_label(units)
     
     config = load_config()
     corner_config = config['corner_detection']
@@ -452,10 +495,10 @@ def _corner_analysis(df: pd.DataFrame, valid_laps: list) -> list[str]:
         avg_exit = np.mean(exit_speeds) if exit_speeds else 0
         avg_brake_pt = np.mean(brake_points) if brake_points else 0
         consistency = np.std(apex_speeds) if len(apex_speeds) > 1 else 0
-        consistency_rating = f"±{consistency:.1f} mph"
+        consistency_rating = f"±{consistency:.1f} {slabel}"
         
         report_lines.append(
-            f"| {corner_num} | {avg_entry:.1f} mph | {avg_apex:.1f} mph | {avg_exit:.1f} mph | "
+            f"| {corner_num} | {avg_entry:.1f} {slabel} | {avg_apex:.1f} {slabel} | {avg_exit:.1f} {slabel} | "
             f"{avg_brake_pt:.1f}% | {consistency_rating} |"
         )
     
@@ -463,9 +506,10 @@ def _corner_analysis(df: pd.DataFrame, valid_laps: list) -> list[str]:
     return report_lines
 
 
-def _consistency_analysis(df: pd.DataFrame, valid_laps: list) -> list[str]:
+def _consistency_analysis(df: pd.DataFrame, valid_laps: list, units: Units = "mph") -> list[str]:
     """Calculate consistency metrics across laps."""
     report_lines = ["\n## Consistency Metrics\n"]
+    slabel = speed_label(units)
     
     lap_times = []
     avg_speeds = []
@@ -492,7 +536,7 @@ def _consistency_analysis(df: pd.DataFrame, valid_laps: list) -> list[str]:
     speed_rating = "Good" if speed_std < consistency_config['good_speed'] else "Fair" if speed_std < consistency_config['fair_speed'] else "High"
     
     report_lines.append(f"| Lap Time | ±{lap_time_std:.3f}s | {time_rating} |")
-    report_lines.append(f"| Avg Speed | ±{speed_std:.2f} mph | {speed_rating} |")
+    report_lines.append(f"| Avg Speed | ±{speed_std:.2f} {slabel} | {speed_rating} |")
     report_lines.append("")
 
     return report_lines
