@@ -9,7 +9,8 @@ import numpy as np
 import pandas as pd
 
 from .analysis import analyze_telemetry
-from .utils import is_lap_complete, load_config
+from .metadata import read_session_metadata
+from .utils import Units, is_lap_complete, load_config
 
 logger = logging.getLogger("iracing_telemetry")
 
@@ -78,10 +79,28 @@ def _read_ibt(input_path: Path) -> pd.DataFrame:
         ibt.close()
 
 
+def filter_channels(df: pd.DataFrame) -> pd.DataFrame:
+    """Keep the essential channels, tolerating a LapDist fallback."""
+    available_channels = []
+    for channel in FILTERED_CHANNELS:
+        if channel in df.columns:
+            available_channels.append(channel)
+        elif channel == "LapDistPct" and "LapDist" in df.columns:
+            available_channels.append("LapDist")
+            logger.info("Using 'LapDist' instead of 'LapDistPct'")
+    return df[available_channels]
+
+
+def load_filtered_frame(input_path: Path) -> pd.DataFrame:
+    """Read an .ibt file and return the filtered telemetry frame (writes nothing)."""
+    return filter_channels(_read_ibt(input_path))
+
+
 def convert_ibt_to_csv(
     input_path: Path,
     output_dir: Path | None = None,
     generate_plots: bool = True,
+    units: Units = "mph",
 ) -> None:
     """Convert an iRacing .ibt file to CSVs and, optionally, an analysis report.
 
@@ -94,8 +113,13 @@ def convert_ibt_to_csv(
         output_dir: Base directory for output. CSVs go to <output_dir>/csv_output
             and plots to <output_dir>/plots. Defaults to the current directory.
         generate_plots: Run the analysis and produce plots/report.
+        units: Speed units for the report and plots ("mph" or "kph").
     """
     base_name = _normalize_filename(input_path.name)
+
+    metadata = read_session_metadata(input_path)
+    if metadata.track_display_name or metadata.car:
+        logger.info("Session: %s | %s", metadata.track_label, metadata.car or "unknown car")
 
     base_dir = output_dir if output_dir is not None else Path.cwd()
     csv_dir = base_dir / "csv_output"
@@ -108,16 +132,7 @@ def convert_ibt_to_csv(
     df.to_csv(full_output, index=False)
     logger.info("Full CSV written: %s", full_output.name)
 
-    # Resolve filtered channels, tolerating a LapDist fallback.
-    available_channels = []
-    for channel in FILTERED_CHANNELS:
-        if channel in df.columns:
-            available_channels.append(channel)
-        elif channel == "LapDistPct" and "LapDist" in df.columns:
-            available_channels.append("LapDist")
-            logger.info("Using 'LapDist' instead of 'LapDistPct'")
-
-    df_filtered = df[available_channels]
+    df_filtered = filter_channels(df)
     filtered_output = full_output.with_stem(f"{full_output.stem}_filtered")
     df_filtered.to_csv(filtered_output, index=False)
     logger.info("Filtered CSV written: %s", filtered_output.name)
@@ -130,7 +145,9 @@ def convert_ibt_to_csv(
         return
 
     try:
-        analyze_telemetry(filtered_output, base_name, plots_dir=plots_dir)
+        analyze_telemetry(
+            filtered_output, base_name, plots_dir=plots_dir, units=units, metadata=metadata
+        )
         logger.info("Conversion complete: %s", base_name)
     except Exception:
         logger.exception("Analysis failed for %s", base_name)
@@ -169,3 +186,32 @@ def _write_per_lap_csvs(df_filtered: pd.DataFrame, full_output: Path) -> None:
         lap_output = full_output.with_stem(f"{full_output.stem}_lap{int(lap_num)}")
         lap_df.to_csv(lap_output, index=False)
         logger.debug("Lap %d written: %s (%d rows)", int(lap_num), lap_output.name, len(lap_df))
+
+
+def iter_ibt_files(path: Path) -> list[Path]:
+    """Resolve a path to the .ibt files it refers to (a single file or a folder)."""
+    if path.is_dir():
+        return sorted(path.glob("*.ibt"))
+    return [path]
+
+
+def convert_batch(
+    paths: list[Path],
+    output_dir: Path | None = None,
+    generate_plots: bool = True,
+    units: Units = "mph",
+) -> dict[Path, Exception | None]:
+    """Convert several .ibt files, keeping going if one fails.
+
+    Returns a mapping of each input path to ``None`` on success or the raised
+    exception on failure.
+    """
+    results: dict[Path, Exception | None] = {}
+    for path in paths:
+        try:
+            convert_ibt_to_csv(path, output_dir, generate_plots, units)
+            results[path] = None
+        except Exception as exc:  # noqa: BLE001 - record and continue with the rest
+            logger.exception("Failed to convert %s", path.name)
+            results[path] = exc
+    return results

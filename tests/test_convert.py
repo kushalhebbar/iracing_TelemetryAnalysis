@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import pandas as pd
 
-from iracing_telemetry.convert import _normalize_filename, _write_per_lap_csvs
+import iracing_telemetry.convert as convert_mod
+from iracing_telemetry.convert import (
+    _normalize_filename,
+    _write_per_lap_csvs,
+    convert_batch,
+    iter_ibt_files,
+)
 
 
 class TestNormalizeFilename:
@@ -38,3 +44,36 @@ class TestWritePerLapCsvs:
         df = pd.DataFrame({"Speed": [1, 2, 3]})
         _write_per_lap_csvs(df, tmp_path / "session.csv")
         assert list(tmp_path.iterdir()) == []
+
+
+class TestIterIbtFiles:
+    def test_single_file(self, tmp_path):
+        f = tmp_path / "a.ibt"
+        f.write_text("")
+        assert iter_ibt_files(f) == [f]
+
+    def test_directory_globs_sorted_ibt_only(self, tmp_path):
+        (tmp_path / "b.ibt").write_text("")
+        (tmp_path / "a.ibt").write_text("")
+        (tmp_path / "notes.txt").write_text("")
+        assert iter_ibt_files(tmp_path) == [tmp_path / "a.ibt", tmp_path / "b.ibt"]
+
+    def test_empty_directory(self, tmp_path):
+        assert iter_ibt_files(tmp_path) == []
+
+
+class TestConvertBatch:
+    def test_records_failures_and_continues(self, tmp_path, monkeypatch):
+        good = tmp_path / "good.ibt"
+        bad = tmp_path / "bad.ibt"
+
+        def fake_convert(path, output_dir=None, generate_plots=True, units="mph"):
+            if path.name == "bad.ibt":
+                raise ValueError("boom")
+
+        monkeypatch.setattr(convert_mod, "convert_ibt_to_csv", fake_convert)
+        results = convert_batch([good, bad])
+
+        assert results[good] is None
+        assert isinstance(results[bad], ValueError)
+
