@@ -13,10 +13,17 @@ recording, keeps only the complete laps, and writes one interactive HTML report 
 markdown summary covering delta traces, corner-by-corner speeds, braking points,
 consistency scoring, trail-braking detection, and a GPS racing line.
 
-## Sample output
+## Interactive dashboard
 
-The command generates a self-contained interactive report you can open in any browser.
-A committed example lives in [`examples/`](examples/).
+The main way to explore a session is the Streamlit app: upload a `.ibt` file (or pick one
+from `ibt_input/`), toggle mph/kph, choose which laps to compare, and read the analysis
+alongside the interactive charts.
+
+```bash
+poetry run streamlit run streamlit_app.py
+```
+
+The charts below show the kind of output it renders:
 
 | Speed traces | Braking points |
 | --- | --- |
@@ -26,8 +33,7 @@ A committed example lives in [`examples/`](examples/).
 | --- | --- |
 | ![Throttle and brake](examples/screenshots/throttle_brake.png) | ![Track map](examples/screenshots/track_map.png) |
 
-- Interactive report: [`examples/sample_telemetry_report.html`](examples/sample_telemetry_report.html)
-- Markdown summary: [`examples/sample_report.md`](examples/sample_report.md)
+A committed markdown sample lives at [`examples/sample_report.md`](examples/sample_report.md).
 
 ## Quickstart
 
@@ -35,19 +41,29 @@ A committed example lives in [`examples/`](examples/).
 # 1. Install dependencies (Poetry: https://python-poetry.org/docs/#installation)
 poetry install
 
-# 2. Drop a .ibt file in ibt_input/ and run the analysis
+# 2a. Explore interactively in the browser
+poetry run streamlit run streamlit_app.py
+
+# 2b. Or run the CLI to export CSVs + a markdown report
 poetry run iracing-telemetry "ibt_input/<your-file>.ibt"
 ```
 
 ### CLI
 
 ```
-iracing-telemetry INPUT [-o OUTPUT_DIR] [--no-plots] [-v]
+iracing-telemetry INPUT [-o OUTPUT_DIR] [--no-plots] [--units mph|kph] [-v]
 
-  INPUT                 Path to a .ibt file
+  INPUT                 A .ibt file, or a directory of .ibt files (batch mode)
   -o, --output-dir DIR  Base directory for output (default: current directory)
-  --no-plots            Export CSVs only, skip plots and report
+  --no-plots            Export CSVs only, skip the markdown report
+  --units mph|kph       Speed units (default: mph)
   -v, --verbose         Enable DEBUG logging
+```
+
+Pass a folder to process a whole session's worth of files in one go:
+
+```bash
+poetry run iracing-telemetry ibt_input/
 ```
 
 **Outputs** (written under `csv_output/` and `plots/`):
@@ -58,32 +74,39 @@ iracing-telemetry INPUT [-o OUTPUT_DIR] [--no-plots] [-v]
 | `<track>_<date>_filtered.csv` | Essential channels only |
 | `<track>_<date>_lap<N>.csv` | One file per complete lap |
 | `<track>_<date>_summary.csv` | Per-lap statistics |
-| `<track>_<date>_telemetry_report.html` | Interactive report (all plots) |
 | `report.md` | Markdown analysis summary |
 
 ## What it analyses
 
 - **Lap detection** — only laps covering ≥90% of the track are analysed, filtering out
   out-laps and partial recordings.
+- **Sector timing** — splits each lap into mini-sectors and stitches the fastest of each
+  into a **theoretical best lap**, showing how much time is left on the table.
 - **Delta time** — time gained/lost versus the fastest lap at every point on track.
 - **Corner-by-corner** — auto-detected corners with entry/apex/exit speeds, brake points,
   and per-corner consistency.
+- **Balance** — an understeer/oversteer tendency from steering versus lateral grip.
 - **Consistency scoring** — lap-time and speed standard deviation scored 0–100.
 - **Inputs** — throttle/brake smoothness ratings and gear-shift RPM patterns.
 - **Trail braking** — detects braking-while-turning and measures brake-release rate.
 - **Racing line** — GPS (lat/lon) line coloured by speed, overlaid across laps.
 
-All speeds are converted from iRacing's native m/s to mph.
+All speeds are shown in mph or kph (your choice).
 
 ## Project structure
 
 ```
+streamlit_app.py      # Interactive dashboard (report + charts)
+requirements.txt      # Runtime deps for hosting (Streamlit Cloud)
 src/iracing_telemetry/
-├── cli.py            # Argument parsing and entry point
+├── cli.py            # Argument parsing, single-file and batch entry point
 ├── convert.py        # .ibt -> DataFrame -> CSV export + per-lap splitting
+├── metadata.py       # Session metadata (track, car, driver) from the .ibt header
 ├── analysis.py       # Lap stats and the markdown report
-├── plotly_plots.py   # Interactive Plotly figures + combined HTML
-├── utils.py          # Shared helpers (config, lap validation, formatting)
+├── sectors.py        # Mini-sector timing + theoretical best lap
+├── balance.py        # Understeer/oversteer balance heuristic
+├── plotly_plots.py   # Interactive Plotly figure builders
+├── utils.py          # Shared helpers (config, units, lap validation, formatting)
 └── constants.json    # Tunable thresholds (lap validation, corner detection, ...)
 tests/                # pytest suite with synthetic telemetry fixtures
 examples/             # Committed sample report and screenshots
@@ -110,6 +133,23 @@ Python 3.11 and 3.12 for every push and pull request.
 - Record 3–5+ complete laps for meaningful consistency and corner comparisons.
 - Delta time and corner-to-corner comparisons require at least two complete laps.
 - Avoid saving telemetry mid-lap so lap detection stays accurate.
+
+## Deploy the dashboard
+
+The app runs anywhere Streamlit does. To host it free on
+[Streamlit Community Cloud](https://streamlit.io/cloud):
+
+1. Push this repo to GitHub.
+2. On Streamlit Community Cloud, create a new app pointing at `streamlit_app.py`.
+3. Dependencies install automatically from [`requirements.txt`](requirements.txt).
+
+Visitors can upload their own `.ibt` file from the sidebar — no local setup required.
+Run it locally the same way:
+
+```bash
+pip install -r requirements.txt
+streamlit run streamlit_app.py
+```
 
 ## License
 
