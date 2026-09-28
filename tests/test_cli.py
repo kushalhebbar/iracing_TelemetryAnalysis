@@ -20,3 +20,9 @@ def test_non_ibt_suffix_exits_with_error(tmp_path):
     with pytest.raises(SystemExit) as exc:
         main([str(not_ibt)])
     assert exc.value.code == 2
+
+
+def test_empty_directory_exits_with_error(tmp_path):
+    with pytest.raises(SystemExit) as exc:
+        main([str(tmp_path)])
+    assert exc.value.code == 2

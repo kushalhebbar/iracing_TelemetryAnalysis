@@ -4,7 +4,7 @@ import argparse
 import logging
 from pathlib import Path
 
-from .convert import convert_ibt_to_csv
+from .convert import convert_batch, iter_ibt_files
 
 logger = logging.getLogger("iracing_telemetry")
 
@@ -17,7 +17,9 @@ def _build_parser() -> argparse.ArgumentParser:
             "interactive analysis report."
         ),
     )
-    parser.add_argument("input", type=Path, help="Path to a .ibt file")
+    parser.add_argument(
+        "input", type=Path, help="A .ibt file or a directory of .ibt files"
+    )
     parser.add_argument(
         "-o",
         "--output-dir",
@@ -28,7 +30,13 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-plots",
         action="store_true",
-        help="Skip plot and report generation (CSV export only)",
+        help="Skip report generation (CSV export only)",
+    )
+    parser.add_argument(
+        "--units",
+        choices=["mph", "kph"],
+        default="mph",
+        help="Speed units for the report (default: mph)",
     )
     parser.add_argument(
         "-v",
@@ -50,21 +58,26 @@ def main(argv: list[str] | None = None) -> int:
 
     input_path: Path = args.input
     if not input_path.exists():
-        parser.error(f"Input file not found: {input_path}")
-    if input_path.suffix.lower() != ".ibt":
-        parser.error("Input must be a .ibt file")
+        parser.error(f"Input not found: {input_path}")
 
-    try:
-        convert_ibt_to_csv(
-            input_path=input_path,
-            output_dir=args.output_dir,
-            generate_plots=not args.no_plots,
-        )
-    except Exception as exc:  # noqa: BLE001 - surface any failure as a clean CLI error
-        logger.error("Conversion failed: %s", exc)
-        return 1
+    if input_path.is_file() and input_path.suffix.lower() != ".ibt":
+        parser.error("Input file must be a .ibt file")
 
-    return 0
+    files = iter_ibt_files(input_path)
+    if not files:
+        parser.error(f"No .ibt files found in {input_path}")
+
+    results = convert_batch(
+        files,
+        output_dir=args.output_dir,
+        generate_plots=not args.no_plots,
+        units=args.units,
+    )
+
+    failures = [path for path, exc in results.items() if exc is not None]
+    if len(files) > 1:
+        logger.info("Processed %d file(s), %d failed", len(files), len(failures))
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":
