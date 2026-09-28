@@ -1,0 +1,9 @@
+# Runtime dependencies for the Streamlit app (e.g. Streamlit Community Cloud).
+# For local development use Poetry instead: `poetry install`.
+streamlit>=1.38
+pandas>=2.2
+numpy>=2.0
+scipy>=1.11
+plotly>=6.5
+pyirsdk
+pyyaml>=6.0
