@@ -1,6 +1,7 @@
 {
   "speed_conversion": {
-    "ms_to_mph": 2.237
+    "ms_to_mph": 2.237,
+    "ms_to_kph": 3.6
   },
   "lap_validation": {
     "min_lap_samples": 100,
@@ -37,5 +38,13 @@
     "brake_threshold": 0.05,
     "throttle_threshold": 0.05,
     "steering_threshold": 0.05
+  },
+  "sectors": {
+    "count": 10
+  },
+  "balance": {
+    "latg_threshold": 10.0,
+    "neutral_band": 0.05,
+    "sample_band": 0.1
   }
 }
