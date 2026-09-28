@@ -5,6 +5,7 @@ from __future__ import annotations
 import pandas as pd
 
 from iracing_telemetry.utils import (
+    convert_speed,
     convert_speed_to_mph,
     format_lap_time,
     get_valid_laps,
@@ -12,6 +13,8 @@ from iracing_telemetry.utils import (
     load_config,
     ms_to_mph,
     rate_smoothness,
+    speed_factor,
+    speed_label,
 )
 
 
@@ -51,6 +54,26 @@ class TestConvertSpeed:
         assert result["Speed"].tolist() == [10.0 * ms_to_mph(), 20.0 * ms_to_mph()]
         # Original is untouched.
         assert df["Speed"].tolist() == [10.0, 20.0]
+
+
+class TestUnits:
+    def test_mph_factor(self):
+        assert speed_factor("mph") == 2.237
+
+    def test_kph_factor(self):
+        assert speed_factor("kph") == 3.6
+
+    def test_labels(self):
+        assert speed_label("mph") == "mph"
+        assert speed_label("kph") == "kph"
+
+    def test_convert_speed_kph(self):
+        df = pd.DataFrame({"Speed": [10.0]})
+        assert convert_speed(df, "kph")["Speed"].iloc[0] == 36.0
+
+    def test_convert_speed_defaults_to_mph(self):
+        df = pd.DataFrame({"Speed": [10.0]})
+        assert convert_speed(df)["Speed"].iloc[0] == 10.0 * 2.237
 
 
 class TestLoadConfig:

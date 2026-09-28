@@ -6,10 +6,13 @@ import json
 import logging
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 import pandas as pd
 
 logger = logging.getLogger("iracing_telemetry")
+
+Units = Literal["mph", "kph"]
 
 
 @lru_cache(maxsize=1)
@@ -20,16 +23,32 @@ def load_config() -> dict:
         return json.load(f)
 
 
+def speed_factor(units: Units = "mph") -> float:
+    """m/s conversion factor for the requested speed units."""
+    key = "ms_to_kph" if units == "kph" else "ms_to_mph"
+    return load_config()["speed_conversion"][key]
+
+
+def speed_label(units: Units = "mph") -> str:
+    """Axis/legend label for the requested speed units."""
+    return "kph" if units == "kph" else "mph"
+
+
 def ms_to_mph() -> float:
     """m/s to mph conversion factor."""
-    return load_config()["speed_conversion"]["ms_to_mph"]
+    return speed_factor("mph")
+
+
+def convert_speed(df: pd.DataFrame, units: Units = "mph") -> pd.DataFrame:
+    """Return a copy of df with Speed converted from m/s to the given units."""
+    df_copy = df.copy()
+    df_copy["Speed"] = df_copy["Speed"] * speed_factor(units)
+    return df_copy
 
 
 def convert_speed_to_mph(df: pd.DataFrame) -> pd.DataFrame:
     """Return a copy of df with the Speed column converted from m/s to mph."""
-    df_copy = df.copy()
-    df_copy["Speed"] = df_copy["Speed"] * ms_to_mph()
-    return df_copy
+    return convert_speed(df, "mph")
 
 
 def is_lap_complete(lap_data: pd.DataFrame) -> bool:
