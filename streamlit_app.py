@@ -110,9 +110,9 @@ def main() -> None:
             st.subheader(name)
             if isinstance(figure, list):
                 for fig in figure:
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
             else:
-                st.plotly_chart(figure, use_container_width=True)
+                st.plotly_chart(figure, width="stretch")
 
     with report_tab:
         st.markdown(build_report(df, input_path.stem, units=units, metadata=metadata))
