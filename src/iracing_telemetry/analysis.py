@@ -542,47 +542,65 @@ def _consistency_analysis(df: pd.DataFrame, valid_laps: list, units: Units = "mp
     return report_lines
 
 
+def _count_steering_reversals(steering: np.ndarray, deadband: float) -> int:
+    """Count genuine steering reversals, ignoring jitter smaller than deadband.
+
+    A hysteresis peak counter: a reversal is only registered once the wheel has
+    moved back past ``deadband`` from the last extreme, so sensor noise and
+    micro-corrections don't inflate the count.
+    """
+    count = 0
+    direction = 0
+    extreme = steering[0]
+    for value in steering:
+        if value > extreme + deadband and direction <= 0:
+            direction, extreme = 1, value
+            count += 1
+        elif value < extreme - deadband and direction >= 0:
+            direction, extreme = -1, value
+            count += 1
+        elif (direction >= 0 and value > extreme) or (direction <= 0 and value < extreme):
+            extreme = value
+    return count
+
+
 def _steering_analysis(df: pd.DataFrame, valid_laps: list) -> list[str]:
-    """Analyze steering smoothness and corrections."""
+    """Count significant steering reversals per lap."""
     report_lines = ["\n## Steering Analysis\n"]
-    
+
     if 'SteeringWheelAngle' not in df.columns:
         report_lines.append("Steering data not available.\n")
         return report_lines
-    
-    config = load_config()
-    steering_config = config['steering_analysis']
 
-    report_lines.append("| Lap | Smoothness | Corrections/Lap | Max Angle | Rating |")
-    report_lines.append("|-----|------------|-----------------|-----------|--------|")
-    
+    steering_config = load_config()['steering_analysis']
+    deadband = steering_config['reversal_deadband']
+
+    report_lines.append("| Lap | Corrections | Max Angle | Rating |")
+    report_lines.append("|-----|-------------|-----------|--------|")
+
     for lap in valid_laps:
         lap_data = df[df['Lap'] == lap].sort_values('LapDistPct')
-        steering = lap_data['SteeringWheelAngle']
-        
-        steering_changes = steering.diff().abs()
-        smoothness = 1 - (steering_changes.mean() / 0.1)
-        smoothness_pct = max(0, min(100, smoothness * 100))
-        
-        steering_diff = steering.diff()
-        direction_changes = ((steering_diff.shift(1) * steering_diff) < 0).sum()
-        corrections = direction_changes / 2
-        
-        max_angle = steering.abs().max()
-        
-        if smoothness_pct > steering_config['excellent_smoothness'] and corrections < steering_config['excellent_corrections']:
+        steering = lap_data['SteeringWheelAngle'].to_numpy()
+
+        corrections = _count_steering_reversals(steering, deadband)
+        max_angle = float(np.abs(steering).max())
+
+        if corrections < steering_config['good_corrections']:
             rating = "Good"
-        elif smoothness_pct > steering_config['good_smoothness'] and corrections < steering_config['good_corrections']:
+        elif corrections < steering_config['fair_corrections']:
             rating = "Fair"
         else:
             rating = "High"
-        
+
         report_lines.append(
-            f"| {int(lap)} | {smoothness_pct:.1f}% | {int(corrections)} | {max_angle:.3f} rad | {rating} |"
+            f"| {int(lap)} | {corrections} | {max_angle:.2f} rad | {rating} |"
         )
 
-    report_lines.append(f"\nTarget: >{steering_config['excellent_smoothness']}% smoothness, <{steering_config['excellent_corrections']} corrections/lap.\n")
-    
+    report_lines.append(
+        f"\nCorrections = steering reversals larger than {np.degrees(deadband):.0f}°. "
+        "Fewer, deliberate inputs are smoother.\n"
+    )
+
     return report_lines
 
 

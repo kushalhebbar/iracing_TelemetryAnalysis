@@ -14,10 +14,9 @@
     "brake_fair_threshold": 0.02
   },
   "steering_analysis": {
-    "excellent_smoothness": 90,
-    "good_smoothness": 80,
-    "excellent_corrections": 10,
-    "good_corrections": 20
+    "reversal_deadband": 0.1,
+    "good_corrections": 50,
+    "fair_corrections": 80
   },
   "consistency_rating": {
     "good_lap_time": 0.5,

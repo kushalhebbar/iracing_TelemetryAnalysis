@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import numpy as np
+
 from iracing_telemetry.analysis import (
     _analyze_gear_shifts,
     _analyze_input_smoothness,
@@ -9,6 +11,7 @@ from iracing_telemetry.analysis import (
     _compare_laps,
     _consistency_analysis,
     _corner_analysis,
+    _count_steering_reversals,
     _steering_analysis,
     _trail_braking_analysis,
     build_report,
@@ -98,6 +101,20 @@ class TestReportSections:
         df = telemetry_df.drop(columns=["SteeringWheelAngle"])
         lines = _steering_analysis(df, [1, 2])
         assert "Steering data not available" in "\n".join(lines)
+
+
+class TestCountSteeringReversals:
+    def test_counts_each_significant_swing(self):
+        signal = np.array([0.0, 1.0, 0.0, 1.0, 0.0])
+        assert _count_steering_reversals(signal, 0.5) == 4
+
+    def test_ignores_jitter_below_deadband(self):
+        signal = np.array([0.0, 0.05, 0.0, 0.05, 0.0, 2.0])
+        assert _count_steering_reversals(signal, 0.5) == 1
+
+    def test_gradual_sweep_has_no_reversal(self):
+        # A single smooth sweep in one direction is not a reversal.
+        assert _count_steering_reversals(np.linspace(0, 3, 50), 0.1) == 0
 
     def test_trail_braking_reports_percentage(self, telemetry_df):
         lines = _trail_braking_analysis(telemetry_df, [1, 2])
