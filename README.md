@@ -1,6 +1,8 @@
 # iRacing Telemetry Analysis
 
-> Convert iRacing `.ibt` telemetry into an interactive HTML report for post-session analysis.
+> Turn an iRacing `.ibt` recording into an interactive dashboard that shows where lap time is won and lost.
+
+[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://kh-iracingtelemetryanalysis.streamlit.app/)
 
 [![CI](https://github.com/kushalhebbar/iracing_TelemetryAnalysis/actions/workflows/ci.yml/badge.svg)](https://github.com/kushalhebbar/iracing_TelemetryAnalysis/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
@@ -8,16 +10,19 @@
 [![Checked with mypy](https://img.shields.io/badge/mypy-checked-blue.svg)](https://mypy-lang.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
+**[Try it live →](https://kh-iracingtelemetryanalysis.streamlit.app/)** (a demo session is built in — no telemetry needed)
+
 I built this to review my own iRacing practice sessions. It reads a telemetry
-recording, keeps only the complete laps, and writes one interactive HTML report plus a
+recording, keeps only the complete laps, and renders an interactive dashboard plus a
 markdown summary covering delta traces, corner-by-corner speeds, braking points,
 consistency scoring, trail-braking detection, and a GPS racing line.
 
 ## Interactive dashboard
 
-The main way to explore a session is the Streamlit app: upload a `.ibt` file (or pick one
-from `ibt_input/`), toggle mph/kph, choose which laps to compare, and read the analysis
-alongside the interactive charts.
+**[Live demo](https://kh-iracingtelemetryanalysis.streamlit.app/)** — opens on a built-in
+sample so you can click around immediately. Upload a `.ibt` file (or pick one from the
+sidebar), toggle mph/kph, choose which laps to compare, and read the analysis alongside
+the interactive charts. Run it locally with:
 
 ```bash
 poetry run streamlit run streamlit_app.py
