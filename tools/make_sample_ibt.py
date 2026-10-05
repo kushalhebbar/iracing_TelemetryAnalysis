@@ -63,7 +63,7 @@ DriverInfo:
 """
 
 
-def _synthesise(df_real: pd.DataFrame, n_per_lap: int = 1000, n_laps: int = 4) -> pd.DataFrame:
+def _synthesise(df_real: pd.DataFrame, n_per_lap: int = 6000, n_laps: int = 4) -> pd.DataFrame:
     """Build an n_laps synthetic session from the first complete real lap."""
     template = df_real[df_real["Lap"] == get_valid_laps(df_real)[0]].sort_values("LapDistPct")
     grid = np.linspace(template["LapDistPct"].min(), template["LapDistPct"].max(), n_per_lap)
@@ -95,9 +95,9 @@ def _synthesise(df_real: pd.DataFrame, n_per_lap: int = 1000, n_laps: int = 4) -
                     "Lap": lap_idx + 1,
                     "LapDistPct": grid,
                     "Speed": base["Speed"] * pace,
-                    "Throttle": np.clip(base["Throttle"] + rng.normal(0, 0.01, n_per_lap), 0, 1),
-                    "Brake": np.clip(base["Brake"] + rng.normal(0, 0.01, n_per_lap), 0, 1),
-                    "SteeringWheelAngle": base["SteeringWheelAngle"] + rng.normal(0, 0.01, n_per_lap),
+                    "Throttle": np.clip(base["Throttle"] + rng.normal(0, 0.003, n_per_lap), 0, 1),
+                    "Brake": np.clip(base["Brake"] + rng.normal(0, 0.003, n_per_lap), 0, 1),
+                    "SteeringWheelAngle": base["SteeringWheelAngle"] + rng.normal(0, 0.003, n_per_lap),
                     "Gear": np.round(base["Gear"]).astype(int),
                     "RPM": base["RPM"] * pace,
                     "LatAccel": base["LatAccel"],
